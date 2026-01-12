@@ -1,0 +1,5 @@
+# PyQt6 is recommended, but PyQt5 also works
+PyQt6>=6.0.0
+
+# Alternative: PyQt5
+# PyQt5>=5.15.0

@@ -1,0 +1,129 @@
+---
+alwaysApply: true
+description: Arch Linux ISO Builder project structure and development patterns
+---
+
+# Arch Linux ISO Builder - Cursor Rules
+
+## Project Overview
+
+GUI application for creating bootable Arch Linux ISOs from current system installation. Built with PyQt6/PyQt5.
+
+## Project Structure
+
+- **Entry Point**: `main.py` - Initializes Qt application and launches GUI
+- **Package**: `make_arch_iso/` - Main application package
+- **Constants**: `constants.py` - Colors, spacing, paths, messages
+- **Qt Layer**: `qt_compat.py` - PyQt6/PyQt5 compatibility
+- **Utilities**: `utils.py` - Helper functions
+- **Core Logic**: `builder.py` - ISO building thread
+- **USB Writer**: `usb_writer.py` - USB writing thread
+- **GUI**: `gui/` - All GUI components
+
+## Key Modules
+
+### `make_arch_iso/constants.py`
+- `Colors`: UI color constants (dark theme)
+- `LayoutSpacing`: Layout spacing values
+- `Paths`: Default paths and config locations
+- `Messages`: User-facing message strings
+
+### `make_arch_iso/builder.py`
+- `ISOBuilderThread`: Main ISO building thread class
+  - `DEFAULT_EXCLUDE_DIRS`: Default exclusion patterns
+  - `HOME_COPY_EXCLUDES`: Patterns to exclude when copying user home
+  - Builds ISO using `mkarchiso` command
+  - Generates package lists, customization scripts
+
+### `make_arch_iso/gui/main_window.py`
+- `ISOBuilderGUI`: Main application window
+  - Handles user input and settings
+  - Manages build process and progress
+  - Settings persistence (JSON)
+
+### `make_arch_iso/gui/dialogs.py`
+- `ExclusionsDialog`: Directory exclusion management
+- `PackageSelectionDialog`: Package exclusion selection
+
+## Coding Patterns
+
+### Threading
+- Use QThread subclasses for long-running operations
+- Emit signals for progress updates and completion
+- Use `pyqtSignal` for thread-safe communication
+
+### Error Handling
+- Use `run_command(check=False)` and check returncode manually
+- Emit error signals from threads
+- Display errors in status bar or message boxes
+
+### File Operations
+- Always use UTF-8 encoding for text files
+- Use `safe_remove()` and `safe_makedirs()` utilities
+- Set executable permissions on scripts (0o755)
+
+### Qt Compatibility
+- Import from `qt_compat` module, not directly from PyQt6/PyQt5
+- Check `HAS_PYQT6` or `HAS_PYQT5` flags when needed
+- Use `get_qt_dialog_code()` for dialog return codes
+
+### Constants
+- Import constants from `constants` module
+- Use `Colors.*` for styling
+- Use `Paths.*` for default paths
+- Use `Messages.*` for user messages
+
+## Common Tasks
+
+### Adding Exclusion Patterns
+Edit `ISOBuilderThread.DEFAULT_EXCLUDE_DIRS` in `builder.py`
+
+### Modifying Video Drivers
+Edit `gui_must` list in `ISOBuilderThread.run()` method in `builder.py`
+
+### Customizing Installation Script
+Modify `_write_customize_airootfs()` or installer script generation in `builder.py`
+
+### Adding GUI Features
+- Add widgets to `ISOBuilderGUI.init_ui()` in `gui/main_window.py`
+- Save/load settings in `save_settings()` and `load_settings()` methods
+
+## Dependencies
+
+- Python 3.8+
+- PyQt6 (preferred) or PyQt5
+- `archiso` package (system dependency)
+- Root/sudo required for building and USB writing
+
+## Configuration
+
+Settings stored in `~/.config/iso_builder_gui.json`:
+- `work_dir`, `output_dir`, `write_to_usb`
+- `excluded_packages`, `root_password`, `template_user`
+
+## Development Guidelines
+
+1. **Thread Safety**: Always use signals for GUI updates from threads
+2. **Error Handling**: Emit error signals, don't raise exceptions in threads
+3. **File Encoding**: Always specify UTF-8 encoding
+4. **Permissions**: Set executable bits on scripts (0o755)
+5. **Constants**: Use constants module, don't hardcode values
+6. **Qt Compatibility**: Import from `qt_compat`, check version flags
+
+## Testing
+
+- Run with `sudo python3 main.py` (root required)
+- Test ISO builds in VM before deploying
+- Verify USB writing with test devices
+- Check package list generation accuracy
+
+## Build Process Flow
+
+1. User configures settings in GUI
+2. `ISOBuilderThread` starts in background
+3. Copies archiso profile and builds package list
+4. Creates local repository for AUR packages
+5. Copies user template (if selected)
+6. Writes customization scripts
+7. Runs `mkarchiso` to build ISO
+8. Optionally writes to USB device
