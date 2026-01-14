@@ -401,7 +401,8 @@ echo "[customize_airootfs] done."
             if result.returncode != 0:
                 self._emit("[WARN] Installing archiso...\n")
                 run_command(
-                    ['pacman', '-Sy', '--noconfirm', 'archiso'], check=True
+                    ['pacman', '-S', '--noconfirm', '--needed', 'archiso'],
+                    check=True
                 )
             self.progress_signal.emit(20)
 
@@ -1068,6 +1069,10 @@ case "$DRIVER_CHOICE" in
     ;;
 esac
 
+# Common modules for audio + networking
+COMMON_MODULES="snd_hda_intel snd_sof_pci snd_sof_intel_hda_common iwlwifi r8169 e1000e igb"
+ALL_MODULES="$MKINITCPIO_MODULES $COMMON_MODULES"
+
 echo "[6/8] System config (chroot)..."
 arch-chroot /mnt /bin/bash -euo pipefail <<CHROOT
 echo "root:${{ROOT_PASSWORD}}" | chpasswd
@@ -1089,6 +1094,24 @@ EOF
 # Configure video drivers based on selection
 MKINITCPIO_MODULES="${{MKINITCPIO_MODULES}}"
 REMOVE_DRIVERS="${{REMOVE_DRIVERS}}"
+COMMON_MODULES="${{COMMON_MODULES}}"
+ALL_MODULES="${{ALL_MODULES}}"
+
+# Ensure core firmware, audio, and networking packages are present
+pacman -Syu --noconfirm --needed \\
+  linux-firmware sof-firmware \\
+  networkmanager iwd wpa_supplicant \\
+  pipewire pipewire-alsa pipewire-pulse wireplumber alsa-utils || true
+
+if grep -q "GenuineIntel" /proc/cpuinfo; then
+  pacman -S --noconfirm --needed intel-ucode || true
+elif grep -q "AuthenticAMD" /proc/cpuinfo; then
+  pacman -S --noconfirm --needed amd-ucode || true
+fi
+
+if [[ "$MKINITCPIO_MODULES" == *nvidia* ]]; then
+  pacman -S --noconfirm --needed nvidia nvidia-utils || true
+fi
 
 if [[ -n "$MKINITCPIO_MODULES" ]]; then
   echo "Configuring mkinitcpio with modules: $MKINITCPIO_MODULES"
@@ -1096,11 +1119,28 @@ if [[ -n "$MKINITCPIO_MODULES" ]]; then
   mkinitcpio -P || true
 fi
 
+if [[ -n "$ALL_MODULES" ]]; then
+  echo "Ensuring common modules load on boot: $ALL_MODULES"
+  cat > /etc/modules-load.d/custom-arch-iso.conf <<EOF
+$ALL_MODULES
+EOF
+fi
+
 # Remove unneeded driver packages if specified
 if [[ -n "$REMOVE_DRIVERS" ]]; then
   echo "Removing unneeded driver packages: $REMOVE_DRIVERS"
   pacman -Rns --noconfirm $REMOVE_DRIVERS 2>/dev/null || true
 fi
+
+# Remove deprecated video drivers if present
+pacman -Rns --noconfirm xf86-video-intel xf86-video-ati 2>/dev/null || true
+
+# Ensure only the latest kernel package remains
+pacman -S --noconfirm --needed linux || true
+pacman -Rns --noconfirm \\
+  linux-lts linux-zen linux-hardened linux-rt \\
+  linux-lts-headers linux-zen-headers linux-hardened-headers linux-rt-headers \\
+  2>/dev/null || true
 
 # Services
 systemctl enable NetworkManager.service || true
@@ -1114,12 +1154,53 @@ AutomaticLogin=root
 EOF
 fi
 
+# Ensure optimal screen resolution on first login
+cat > /usr/local/bin/set-optimal-resolution.sh <<'EOF'
+#!/bin/bash
+set -euo pipefail
+
+if ! command -v xrandr >/dev/null 2>&1; then
+  exit 0
+fi
+
+while read -r output status _; do
+  if [[ "$status" != "connected" ]]; then
+    continue
+  fi
+  preferred=$(xrandr --query | awk -v out="$output" '
+    $1 == out {active=1; next}
+    active && $0 ~ /^[[:space:]]+[0-9]+x[0-9]+/ {
+      if ($0 ~ /\\+/) {print $1; exit}
+    }
+    active && $0 !~ /^[[:space:]]/ {active=0}
+  ')
+  if [[ -n "$preferred" ]]; then
+    xrandr --output "$output" --mode "$preferred" --rate 60 2>/dev/null || \
+      xrandr --output "$output" --mode "$preferred" 2>/dev/null || true
+  else
+    xrandr --output "$output" --auto 2>/dev/null || true
+  fi
+done < <(xrandr --query | awk '/ connected / {print $1 " connected"}')
+EOF
+chmod 755 /usr/local/bin/set-optimal-resolution.sh
+
+mkdir -p /etc/xdg/autostart
+cat > /etc/xdg/autostart/set-optimal-resolution.desktop <<EOF
+[Desktop Entry]
+Type=Application
+Name=Set Optimal Resolution
+Exec=/usr/local/bin/set-optimal-resolution.sh
+Terminal=false
+X-GNOME-Autostart-enabled=true
+EOF
+
 # Bootloader: systemd-boot
 bootctl install
 ROOT_UUID=\\$(blkid -s UUID -o value "{'{'}ROOT_PART{'}'}")
 cat > /boot/loader/loader.conf <<EOF
 default arch
 timeout 3
+beep   off
 editor  0
 EOF
 
@@ -1137,6 +1218,19 @@ umount -R /mnt
 echo "[8/8] Installation complete."
 echo "Reboot when ready."
 """)
+            desktop_shortcut = os.path.join(
+                airootfs, 'root', 'Desktop', 'Install Arch.desktop'
+            )
+            self._write_text(desktop_shortcut, """[Desktop Entry]
+Type=Application
+Name=Install Arch Linux
+Comment=Run the custom Arch installer
+Exec=/root/Desktop/install.sh
+Terminal=true
+Icon=utilities-terminal
+Categories=System;
+""")
+            os.chmod(desktop_shortcut, 0o755)
             self.progress_signal.emit(50)
 
             # Create custom build hook to exclude directories
