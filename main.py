@@ -15,6 +15,15 @@ from make_arch_iso.gui.main_window import ISOBuilderGUI
 
 def main():
     """Main entry point"""
+    # Check for root privileges before initializing GUI
+    if os.geteuid() != 0:
+        print("Error: This application must be run with root privileges")
+        print("\nPlease run with:")
+        print("  sudo python3 main.py")
+        print("\nOr:")
+        print("  sudo ./main.py")
+        sys.exit(1)
+
     if not HAS_PYQT6 and not HAS_PYQT5:
         print("Error: PyQt6 or PyQt5 is required")
         print("\nInstall with:")

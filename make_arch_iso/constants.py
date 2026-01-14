@@ -1,6 +1,7 @@
 """Constants for Arch Linux ISO Builder"""
 import os
 
+
 class Colors:
     """Color constants for UI styling - comprehensive dark theme palette"""
 
@@ -93,8 +94,9 @@ class Paths:
     """Default path constants"""
     DEFAULT_WORK_DIR = os.path.expanduser('~/archiso_work')
     DEFAULT_OUTPUT_DIR = os.path.expanduser('~/iso_output')
-    CONFIG_DIR = os.path.expanduser('~/.config')
+    CONFIG_DIR = os.path.expanduser('.config/')
     CONFIG_FILE = os.path.join(CONFIG_DIR, 'iso_builder_gui.json')
+    LOG_DIR = os.path.join(CONFIG_DIR, 'iso_builder_logs')
     RELENG_PROFILE = '/usr/share/archiso/configs/releng/'
     PACMAN_CACHE = '/var/cache/pacman/pkg/'
 

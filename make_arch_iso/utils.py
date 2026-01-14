@@ -18,18 +18,60 @@ def run_command(
 
 
 def safe_remove(path: str, emit_func=None) -> bool:
-    """Safely remove a file or directory"""
+    """Safely remove a file or directory using optimized bulk deletion"""
     if os.path.exists(path):
         if emit_func:
             emit_func(f"  - Removing: {path}\n")
         try:
             if os.path.isdir(path):
-                subprocess.run(['rm', '-rf', path], check=False)
+                # For large directories, use rsync to clear (fastest method)
+                # This is significantly faster than rm -rf for large dirs
+                # because it doesn't need to traverse the directory tree
+                empty_dir = '/tmp/.empty_rsync_dir'
+                os.makedirs(empty_dir, exist_ok=True)
+                try:
+                    # Use rsync to sync empty dir to target (deletes)
+                    empty_path = f'{empty_dir}/'
+                    target_path = f'{path}/'
+                    result = subprocess.run(
+                        ['rsync', '-a', '--delete', empty_path, target_path],
+                        check=False,
+                        stderr=subprocess.DEVNULL,
+                        stdout=subprocess.DEVNULL
+                    )
+                    # Remove the now-empty directory
+                    if result.returncode == 0:
+                        os.rmdir(path)
+                    else:
+                        # Fall back to rm -rf if rsync fails
+                        subprocess.run(
+                            ['rm', '-rf', '--', path],
+                            check=False,
+                            stderr=subprocess.DEVNULL
+                        )
+                finally:
+                    # Clean up temp empty dir
+                    try:
+                        os.rmdir(empty_dir)
+                    except OSError:
+                        pass
             else:
                 os.remove(path)
             return True
         except Exception:
-            return False
+            # Final fallback to rm -rf
+            try:
+                if os.path.isdir(path):
+                    subprocess.run(
+                        ['rm', '-rf', '--', path],
+                        check=False,
+                        stderr=subprocess.DEVNULL
+                    )
+                else:
+                    os.remove(path)
+            except Exception:
+                return False
+            return True
     return False
 
 
@@ -47,8 +89,6 @@ def get_qt_dialog_code():
     except ImportError:
         from PyQt5.QtWidgets import QDialog
         return QDialog.Accepted, QDialog.Rejected
-
-
 
 
 def create_app_icon():

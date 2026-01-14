@@ -1,10 +1,7 @@
 """Main GUI Window"""
 import os
-import sys
 import json
 import subprocess
-import getpass
-import time
 from pathlib import Path
 from typing import Tuple
 
@@ -31,8 +28,11 @@ class ISOBuilderGUI(QMainWindow):
         self.builder_thread = None
         self.usb_writer_thread = None
         self.last_iso_path = None
+        self.current_log_file = None
+        self.log_buffer = []  # Buffer log entries before file is created
         self.load_settings()
         self.init_ui()
+        self._init_log_file()
 
     # Helper methods for DRY
     def set_status(self, text: str, color: str = None) -> None:
@@ -323,35 +323,11 @@ class ISOBuilderGUI(QMainWindow):
 
         main_layout.addLayout(button_layout)
 
-        # Check if running as root
-        is_root = os.geteuid() == 0
-        if not is_root:
-            warning = QLabel(
-                '⚠️  Warning: This application must be run with sudo '
-                'privileges'
-            )
-            warning.setStyleSheet(
-                f'QLabel {{ color: {Colors.WARNING}; font-weight: 600; }}'
-            )
-            warning.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            main_layout.insertWidget(1, warning)
-            self.build_btn.setEnabled(False)
-            # Log the issue
-            import getpass
-            current_user = getpass.getuser()
-            self.log_output.append(
-                f"[INFO] Running as user: {current_user} "
-                f"(UID: {os.geteuid()})\n"
-            )
-            self.log_output.append(
-                "[INFO] Please run with: sudo ./make_arch_iso_gui.py\n"
-            )
-        else:
-            # Explicitly enable button when running as root
-            self.build_btn.setEnabled(True)
-            self.log_output.append(
-                "[INFO] Running as root - Build ISO button enabled\n"
-            )
+        # Build button is always enabled since root check happens pre-GUI
+        self.build_btn.setEnabled(True)
+        self.log_output.append(
+            "[INFO] Running as root - Build ISO button enabled\n"
+        )
 
     def load_settings(self):
         """Load persisted settings from config file"""
@@ -552,7 +528,9 @@ class ISOBuilderGUI(QMainWindow):
 
     def show_package_selection_dialog(self):
         """Show the package selection dialog"""
-        dialog = PackageSelectionDialog(self, self.excluded_packages)
+        dialog = PackageSelectionDialog(
+            self, self.excluded_packages, self.settings
+        )
         accepted, _ = get_qt_dialog_code()
         result = dialog.exec()
 
@@ -560,6 +538,7 @@ class ISOBuilderGUI(QMainWindow):
             self.excluded_packages = dialog.get_excluded_packages()
             self.settings['excluded_packages'] = self.excluded_packages
             self.save_settings()
+        # Note: excluded_packages and package_list are persisted in settings
 
     def get_selected_exclusions(self):
         """Get list of checked exclusion patterns"""
@@ -632,7 +611,8 @@ class ISOBuilderGUI(QMainWindow):
                 f'File: {existing_iso.name}\n'
                 f'Size: {iso_size:.2f} GB\n'
                 f'Age: {iso_age_hours:.1f} hours old\n\n'
-                f'Do you want to use this existing ISO or rebuild?',
+                f'Do you want to use this existing ISO or rebuild?\n\n'
+                'Yes to use existing ISO, No to rebuild, Cancel to exit',
                 QMessageBox.StandardButton.Yes |
                 QMessageBox.StandardButton.No |
                 QMessageBox.StandardButton.Cancel,
@@ -681,6 +661,14 @@ class ISOBuilderGUI(QMainWindow):
         self.set_status(Messages.BUILDING)
         self.log_output.clear()
 
+        # Start new log file for this build
+        self._init_log_file()
+        self.append_log(
+            f"[INFO] Starting ISO build: {iso_name}\n"
+            f"[INFO] Work directory: {config['work_dir']}\n"
+            f"[INFO] Output directory: {output_dir}\n"
+        )
+
         # Start builder thread
         self.builder_thread = ISOBuilderThread(config)
         self.builder_thread.output_signal.connect(self.append_log)
@@ -695,11 +683,51 @@ class ISOBuilderGUI(QMainWindow):
             self.append_log("\n[INFO] Build stopped by user\n")
             self.build_finished(False, "Stopped by user")
 
+    def _init_log_file(self):
+        """Initialize log file for this session"""
+        from datetime import datetime
+        from ..utils import safe_makedirs
+
+        # Create log directory if it doesn't exist
+        safe_makedirs(Paths.LOG_DIR, mode=0o755)
+
+        # Create log file with timestamp
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        log_filename = f'iso_builder_{timestamp}.log'
+        self.current_log_file = os.path.join(Paths.LOG_DIR, log_filename)
+
+        # Write initial log entry
+        session_time = datetime.now().isoformat()
+        with open(self.current_log_file, 'w', encoding='utf-8') as f:
+            f.write(
+                f"ISO Builder Log - Session started at {session_time}\n"
+            )
+            f.write("=" * 80 + "\n")
+
+        # Write any buffered log entries
+        if self.log_buffer:
+            with open(self.current_log_file, 'a', encoding='utf-8') as f:
+                f.writelines(self.log_buffer)
+            self.log_buffer.clear()
+
     def append_log(self, text):
-        """Append text to the log output"""
+        """Append text to the log output and persist to disk"""
         self.log_output.moveCursor(QTextCursor.MoveOperation.End)
         self.log_output.insertPlainText(text)
         self.log_output.moveCursor(QTextCursor.MoveOperation.End)
+
+        # Persist to log file
+        try:
+            if self.current_log_file:
+                # Log file is initialized, append directly
+                with open(self.current_log_file, 'a', encoding='utf-8') as f:
+                    f.write(text)
+            else:
+                # Log file not initialized yet, buffer the entry
+                self.log_buffer.append(text)
+        except (IOError, OSError):
+            # Fail silently if we can't write to log file
+            pass
 
     def update_progress(self, value):
         """Update the progress bar"""

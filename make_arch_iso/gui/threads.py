@@ -4,6 +4,7 @@ import subprocess
 from ..qt_compat import QThread, pyqtSignal
 from ..utils import run_command
 
+
 class PackageLoaderThread(QThread):
     """Thread for loading packages without blocking the UI"""
     progress_signal = pyqtSignal(str)

@@ -1,7 +1,7 @@
 """GUI Dialog classes"""
 from ..qt_compat import (
     QDialog, QVBoxLayout, QHBoxLayout, QPushButton, QLabel,
-    QListWidget, QListWidgetItem, QComboBox, QMessageBox,
+    QListWidget, QListWidgetItem, QMessageBox,
     QLineEdit, QColor, Qt
 )
 from ..constants import Colors
@@ -153,9 +153,10 @@ class ExclusionsDialog(QDialog):
 class PackageSelectionDialog(QDialog):
     """Dialog for managing package exclusions"""
 
-    def __init__(self, parent, excluded_packages=None):
+    def __init__(self, parent, excluded_packages=None, settings=None):
         super().__init__(parent)
         self.parent_window = parent
+        self.settings = settings or {}
         self.setWindowTitle('Package Selection')
         self.setMinimumSize(700, 500)
 
@@ -196,9 +197,36 @@ class PackageSelectionDialog(QDialog):
         self.all_packages = []
         self.aur_packages = set()
         self.excluded_packages = excluded_packages or []
+        # Track which packages are already in the list
+        self.loaded_package_names = set()
+
+        # Create status label early (needed for update_status calls)
+        self.status_label = QLabel('')
+        layout.addWidget(self.status_label)
+
+        # Show excluded packages immediately (before loading completes)
+        if self.excluded_packages:
+            excluded_count = len(self.excluded_packages)
+            self.loading_label.setText(
+                f"Loading packages... ({excluded_count} excluded shown)"
+            )
+            # Add excluded packages to list immediately
+            for pkg_name in self.excluded_packages:
+                item = QListWidgetItem(pkg_name)
+                item.setFlags(
+                    item.flags() | Qt.ItemFlag.ItemIsUserCheckable
+                )
+                item.setCheckState(Qt.CheckState.Checked)
+                # Mark as potentially AUR (will be updated when loading)
+                item.setForeground(QColor(Colors.INFO))
+                item.setToolTip('Excluded package (AUR status loading...)')
+                self.package_list.addItem(item)
+                self.loaded_package_names.add(pkg_name)
+            # Enable search and buttons early for excluded packages
+            self.search_input.setEnabled(True)
+            self.update_status()
 
         self.loader_thread = None
-        self.start_loading_packages()
 
         btn_layout = QHBoxLayout()
 
@@ -222,10 +250,11 @@ class PackageSelectionDialog(QDialog):
         self.deselect_aur_btn.setEnabled(False)
         btn_layout.addWidget(self.deselect_aur_btn)
 
-        layout.addLayout(btn_layout)
+        self.update_btn = QPushButton('Update Package List')
+        self.update_btn.clicked.connect(self.update_package_list)
+        btn_layout.addWidget(self.update_btn)
 
-        self.status_label = QLabel('')
-        layout.addWidget(self.status_label)
+        layout.addLayout(btn_layout)
 
         dialog_btn_layout = QHBoxLayout()
         dialog_btn_layout.addStretch()
@@ -241,8 +270,130 @@ class PackageSelectionDialog(QDialog):
 
         layout.addLayout(dialog_btn_layout)
 
+        # Load from cache or start loading after all UI elements are created
+        self._load_from_cache_or_start()
+
+    def _load_from_cache_or_start(self):
+        """Load package list from cache or start loading if old/missing"""
+        from datetime import datetime
+
+        # Check if we have cached package list
+        cached_list = self.settings.get('package_list', [])
+        cached_date_str = self.settings.get('package_list_date', '')
+
+        if cached_list and cached_date_str:
+            try:
+                cached_date = datetime.fromisoformat(cached_date_str)
+                days_old = (datetime.now() - cached_date).days
+
+                if days_old < 3:
+                    # Cache is fresh, use it
+                    self._load_from_cache(cached_list)
+                    return
+                else:
+                    # Cache is old, prompt user
+                    reply = QMessageBox.question(
+                        self,
+                        'Package List Update',
+                        f'The cached package list is {days_old} days old.\n\n'
+                        'Would you like to update it now?\n\n'
+                        'Yes to update, No to use cached list, Cancel to exit',
+                        QMessageBox.StandardButton.Yes |
+                        QMessageBox.StandardButton.No |
+                        QMessageBox.StandardButton.Cancel,
+                        QMessageBox.StandardButton.Yes
+                    )
+
+                    if reply == QMessageBox.StandardButton.Cancel:
+                        self.reject()
+                        return
+                    elif reply == QMessageBox.StandardButton.No:
+                        self._load_from_cache(cached_list)
+                        return
+                    # If Yes, fall through to start loading
+            except (ValueError, TypeError):
+                # Invalid date format, start fresh
+                pass
+
+        # No cache or user wants to update - start loading
+        self.start_loading_packages()
+
+    def _load_from_cache(self, cached_list):
+        """Load package list from cache"""
+        # Reconstruct all_packages and aur_packages from cache
+        self.all_packages = cached_list
+        self.aur_packages = {
+            pkg['name'] for pkg in cached_list if pkg.get('is_aur', False)
+        }
+
+        # Hide loading label
+        self.loading_label.hide()
+
+        # Enable UI elements including update button
+        self.search_input.setEnabled(True)
+        self.select_all_btn.setEnabled(True)
+        self.deselect_all_btn.setEnabled(True)
+        self.select_aur_btn.setEnabled(True)
+        self.deselect_aur_btn.setEnabled(True)
+        self.update_btn.setEnabled(True)
+        self.ok_btn.setEnabled(True)
+
+        # Populate list
+        self.populate_list()
+
+        # Ensure excluded packages are checked
+        excluded_set = set(self.excluded_packages)
+        for i in range(self.package_list.count()):
+            item = self.package_list.item(i)
+            pkg_name = item.text()
+            if pkg_name in excluded_set:
+                item.setCheckState(Qt.CheckState.Checked)
+                if pkg_name in self.aur_packages:
+                    item.setForeground(QColor(Colors.INFO))
+                    item.setToolTip('AUR package (excluded)')
+                else:
+                    item.setForeground(QColor())
+                    item.setToolTip('Excluded package')
+
+        self.update_status()
+
+    def update_package_list(self):
+        """Manually trigger package list update"""
+        # Stop current loading if in progress
+        if self.loader_thread and self.loader_thread.isRunning():
+            self.loader_thread.terminate()
+            self.loader_thread.wait()
+
+        # Clear current list
+        self.package_list.clear()
+        self.all_packages = []
+        self.aur_packages = set()
+        self.loaded_package_names.clear()
+
+        # Show loading label
+        self.loading_label.show()
+        self.loading_label.setText('Updating package list...')
+        self.loading_label.setStyleSheet(
+            f'QLabel {{ color: {Colors.INFO}; font-weight: 600; }}'
+        )
+
+        # Disable UI elements including update button
+        self.search_input.setEnabled(False)
+        self.select_all_btn.setEnabled(False)
+        self.deselect_all_btn.setEnabled(False)
+        self.select_aur_btn.setEnabled(False)
+        self.deselect_aur_btn.setEnabled(False)
+        self.update_btn.setEnabled(False)
+        self.ok_btn.setEnabled(False)
+
+        # Start loading
+        self.start_loading_packages()
+
     def start_loading_packages(self):
         """Start loading packages in a background thread"""
+        # Disable update button while loading
+        self.update_btn.setEnabled(False)
+
         self.loader_thread = PackageLoaderThread()
         self.loader_thread.progress_signal.connect(self.on_loading_progress)
         self.loader_thread.finished_signal.connect(self.on_loading_finished)
@@ -266,30 +417,51 @@ class PackageSelectionDialog(QDialog):
             )
             return
 
+        # Save to cache
+        self._save_to_cache(all_packages)
+
         # Hide loading label
         self.loading_label.hide()
 
-        # Enable UI elements
+        # Enable UI elements including update button
         self.search_input.setEnabled(True)
         self.select_all_btn.setEnabled(True)
         self.deselect_all_btn.setEnabled(True)
         self.select_aur_btn.setEnabled(True)
         self.deselect_aur_btn.setEnabled(True)
+        self.update_btn.setEnabled(True)
         self.ok_btn.setEnabled(True)
 
-        # Populate list
+        # Populate list (excluded packages are already shown and checked)
         self.populate_list()
 
-        # Set initial exclusions
-        if self.excluded_packages:
-            for pkg in self.excluded_packages:
-                for i in range(self.package_list.count()):
-                    item = self.package_list.item(i)
-                    if item.text() == pkg:
-                        item.setCheckState(Qt.CheckState.Checked)
-                        break
+        # Ensure excluded packages are checked and update AUR status
+        excluded_set = set(self.excluded_packages)
+        for i in range(self.package_list.count()):
+            item = self.package_list.item(i)
+            pkg_name = item.text()
+            if pkg_name in excluded_set:
+                item.setCheckState(Qt.CheckState.Checked)
+                # Update AUR highlighting now that we know
+                if pkg_name in self.aur_packages:
+                    item.setForeground(QColor(Colors.INFO))
+                    item.setToolTip('AUR package (excluded)')
+                else:
+                    # Reset foreground to default (not AUR)
+                    item.setForeground(QColor())  # Default color
+                    item.setToolTip('Excluded package')
 
         self.update_status()
+
+    def _save_to_cache(self, all_packages):
+        """Save package list to cache in settings"""
+        from datetime import datetime
+        if self.parent_window:
+            self.parent_window.settings['package_list'] = all_packages
+            self.parent_window.settings['package_list_date'] = (
+                datetime.now().isoformat()
+            )
+            self.parent_window.save_settings()
 
     def closeEvent(self, event):
         """Clean up thread when dialog is closed"""
@@ -300,24 +472,63 @@ class PackageSelectionDialog(QDialog):
 
     def populate_list(self, filter_text=''):
         """Populate the package list with packages"""
-        self.package_list.clear()
-        filter_lower = filter_text.lower()
+        filter_lower = filter_text.lower() if filter_text else ''
 
-        for pkg_info in self.all_packages:
-            pkg_name = pkg_info['name']
+        # Clear and rebuild list
+        self.package_list.clear()
+        self.loaded_package_names.clear()
+
+        # Re-add excluded packages first (they should always be visible)
+        excluded_packages_set = set(self.excluded_packages)
+        for pkg_name in sorted(excluded_packages_set):
+            # Check if it matches filter
             if filter_text and filter_lower not in pkg_name.lower():
                 continue
 
             item = QListWidgetItem(pkg_name)
             item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
-            item.setCheckState(Qt.CheckState.Unchecked)
+            item.setCheckState(Qt.CheckState.Checked)
 
-            # Highlight AUR packages
-            if pkg_info['is_aur']:
+            # Check if it's AUR (if we have that info from loaded packages)
+            if pkg_name in self.aur_packages:
                 item.setForeground(QColor(Colors.INFO))
-                item.setToolTip('AUR package')
+                item.setToolTip('AUR package (excluded)')
+            elif self.all_packages:
+                # If packages are loaded but this isn't in aur_packages,
+                # it's not AUR
+                item.setToolTip('Excluded package')
+            else:
+                # Packages not loaded yet - will update later
+                item.setForeground(QColor(Colors.INFO))
+                item.setToolTip('Excluded package (AUR status loading...)')
 
             self.package_list.addItem(item)
+            self.loaded_package_names.add(pkg_name)
+
+        # Add all other packages (only if packages have been loaded)
+        if self.all_packages:
+            for pkg_info in self.all_packages:
+                pkg_name = pkg_info['name']
+
+                # Skip if already added (excluded package)
+                if pkg_name in excluded_packages_set:
+                    continue
+
+                # Check filter
+                if filter_text and filter_lower not in pkg_name.lower():
+                    continue
+
+                item = QListWidgetItem(pkg_name)
+                item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
+                item.setCheckState(Qt.CheckState.Unchecked)
+
+                # Highlight AUR packages
+                if pkg_info['is_aur']:
+                    item.setForeground(QColor(Colors.INFO))
+                    item.setToolTip('AUR package')
+
+                self.package_list.addItem(item)
+                self.loaded_package_names.add(pkg_name)
 
     def filter_packages(self, text):
         """Filter packages based on search text"""

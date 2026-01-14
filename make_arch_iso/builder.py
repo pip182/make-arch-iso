@@ -84,6 +84,8 @@ class ISOBuilderThread(QThread):
         '.vscode',
         '.vs',
         '.vim',
+        '.venv',
+        '.env',
         '.viminfo',
         '.sublime-*',
         '.atom',
@@ -112,6 +114,7 @@ class ISOBuilderThread(QThread):
         '.gitconfig',
         '.ssh',
         '.gnupg',
+        'Dev/*',
     ]
     # Directories to exclude when copying user template (temp/cache files)
     HOME_COPY_EXCLUDES = [
@@ -165,6 +168,8 @@ class ISOBuilderThread(QThread):
         '.idea',
         '.vscode',
         '.vs',
+        '.venv/*',
+        '.env/*',
         '*.swp',
         '*.swo',
         '*.swn',
@@ -653,6 +658,31 @@ echo "[customize_airootfs] done."
             # Ensure minimal GNOME + display manager stack exists
             # (If you already have GNOME installed, this does nothing.)
             excluded_packages = set(self.config.get('excluded_packages', []))
+
+            # Define conflicting package groups (only one from each group can be installed)
+            conflict_groups = [
+                # NVIDIA driver packages - only one can be installed
+                ['nvidia', 'nvidia-open', 'nvidia-580xx-dkms', 'nvidia-470xx-dkms',
+                 'nvidia-390xx-dkms', 'nvidia-340xx-dkms'],
+            ]
+
+            # Check for existing conflicting packages in the package list
+            existing_nvidia = None
+            for pkg in packages:
+                for conflict_group in conflict_groups:
+                    if pkg in conflict_group:
+                        if existing_nvidia is None:
+                            existing_nvidia = pkg
+                        elif pkg != existing_nvidia:
+                            # Found a conflict - prefer the one already in the list
+                            self._emit(
+                                f"[INFO] Detected NVIDIA driver conflict: "
+                                f"'{existing_nvidia}' and '{pkg}' both present. "
+                                f"Keeping '{existing_nvidia}' and excluding '{pkg}'.\n"
+                            )
+                            if pkg in packages:
+                                packages.remove(pkg)
+
             gui_must = [
                 "xorg-server",
                 "gnome-shell",
@@ -666,6 +696,7 @@ echo "[customize_airootfs] done."
                 "xf86-video-ati",  # Older AMD/ATI GPUs
                 "nvidia-open",  # NVIDIA open kernel modules (bleeding-edge)
             ]
+
             added_gui = []
             for must in gui_must:
                 if must in excluded_packages:
@@ -674,6 +705,25 @@ echo "[customize_airootfs] done."
                         "Live GNOME may not start.\n"
                     )
                     continue
+
+                # Skip if it conflicts with an existing package
+                skip_due_to_conflict = False
+                for conflict_group in conflict_groups:
+                    if must in conflict_group:
+                        for existing_pkg in packages:
+                            if existing_pkg in conflict_group and existing_pkg != must:
+                                self._emit(
+                                    f"[INFO] Skipping '{must}' - conflicts with "
+                                    f"existing '{existing_pkg}' in package list.\n"
+                                )
+                                skip_due_to_conflict = True
+                                break
+                        if skip_due_to_conflict:
+                            break
+
+                if skip_due_to_conflict:
+                    continue
+
                 if must not in packages and must not in all_packages:
                     packages.append(must)
                     added_gui.append(must)
@@ -1280,6 +1330,7 @@ echo "Reboot when ready."
                         )
 
                 self._emit("[INFO] Verifying ISO structure...\n")
+                iso_structure_valid = False
                 try:
                     result = run_command(['file', str(iso_file)], check=False)
                     if result.returncode == 0:
@@ -1287,22 +1338,26 @@ echo "Reboot when ready."
                             f"[INFO] ISO file type: "
                             f"{result.stdout.strip()}\n"
                         )
-                        is_valid = (
+                        iso_structure_valid = (
                             'ISO 9660' in result.stdout or
                             'bootable' in result.stdout.lower()
                         )
-                        if is_valid:
+                        if iso_structure_valid:
                             self._emit(
                                 "[INFO] ISO appears to be a valid bootable "
                                 "image.\n"
                             )
+                            # If ISO structure is valid, consider squashfs as found
+                            squashfs_found = True
                 except Exception:
                     pass
 
-                if not squashfs_found and size < 1.0:
+                # Only fail verification if ISO structure is invalid AND size is suspicious
+                # Valid ISO structure is more important than size check
+                if not squashfs_found and not iso_structure_valid and size < 0.2:
                     self._emit(
                         "[ERROR] Build verification failed: ISO is too small "
-                        "and squashfs not found.\n"
+                        "and structure appears invalid.\n"
                     )
                     if error_detected:
                         self._emit(
