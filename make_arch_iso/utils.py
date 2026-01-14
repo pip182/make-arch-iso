@@ -2,6 +2,8 @@
 import os
 import subprocess
 from typing import List
+from .qt_compat import QIcon, QPixmap, QPainter, QColor, Qt, HAS_PYQT6
+
 
 def run_command(
     cmd: List[str],
@@ -93,7 +95,6 @@ def get_qt_dialog_code():
 
 def create_app_icon():
     """Create an application icon for Arch Linux ISO Builder"""
-    from .qt_compat import QIcon, QPixmap, QPainter, QColor, Qt, HAS_PYQT6
 
     # Create a 64x64 pixmap for the icon
     size = 64
@@ -114,14 +115,14 @@ def create_app_icon():
     painter.setPen(QColor(180, 180, 180))
     painter.setBrush(QColor(220, 220, 220))
     painter.drawEllipse(center - disc_radius, center - disc_radius,
-                       disc_radius * 2, disc_radius * 2)
+                        disc_radius * 2, disc_radius * 2)
 
     # Inner circle (center hole of disc)
     inner_radius = 6
     painter.setPen(QColor(60, 60, 60))
     painter.setBrush(QColor(40, 40, 40))
     painter.drawEllipse(center - inner_radius, center - inner_radius,
-                       inner_radius * 2, inner_radius * 2)
+                        inner_radius * 2, inner_radius * 2)
 
     # Draw Arch Linux triangle (Arch brand blue color)
     triangle_size = 14

@@ -25,30 +25,59 @@ class ISOBuilderThread(QThread):
         '.thumbs',
         # User directories (large media files)
         'Downloads',
-        'Downloads/*',
         'Templates',
         'Public',
         'Videos',
         'Music',
         'Pictures',
         'Documents',
-        # Browser caches
+        # Browser caches and data
         '.mozilla/firefox/*/cache2',
         '.mozilla/firefox/*/Cache',
         '.mozilla/firefox/*/cache',
+        '.mozilla/firefox/*/Code Cache',
+        '.mozilla/firefox/*/startupCache',
         '.config/google-chrome/*/Cache',
         '.config/google-chrome/*/cache',
+        '.config/google-chrome/*/OptGuideOnDeviceModel',
+        '.config/google-chrome/*/optimization_guide_model_store',
+        '.config/google-chrome/*/component_crx_cache',
+        '.config/google-chrome/*/WasmTtsEngine',
+        '.config/google-chrome/*/Safe Browsing',
         '.config/chromium/*/Cache',
         '.config/chromium/*/cache',
+        '.config/chromium/*/OptGuideOnDeviceModel',
+        '.config/chromium/*/optimization_guide_model_store',
         '.config/BraveSoftware/*/Cache',
         '.config/BraveSoftware/*/cache',
-        # Snap/Docker/VirtualBox
+        '.config/BraveSoftware/*/OptGuideOnDeviceModel',
+        '.config/microsoft-edge/*/Cache',
+        '.config/microsoft-edge/*/cache',
+        '.config/opera/*/Cache',
+        '.config/opera/*/cache',
+        '.config/vivaldi/*/Cache',
+        '.config/vivaldi/*/cache',
+        '.config/torbrowser',
+        # Messaging/communication apps
+        '.local/share/TelegramDesktop',
+        '.config/telegram-desktop',
+        '.config/discord',
+        '.discord',
+        '.config/Signal',
+        '.config/slack',
+        '.config/Element',
+        '.thunderbird',
+        # Snap/Docker/VirtualBox/Containers
         'snap',
         '.snap',
         '.docker',
         'docker',
         'VirtualBox VMs',
         '.VirtualBox',
+        '.vagrant',
+        '.kube',
+        '.lxc',
+        '.local/share/lxc',
         # Temp directories
         'tmp',
         'temp',
@@ -66,6 +95,7 @@ class ISOBuilderThread(QThread):
         '*.egg-info',
         '.coverage',
         'htmlcov',
+        'target',  # Rust build directory
         # Package manager caches
         '.npm',
         '.yarn',
@@ -76,27 +106,81 @@ class ISOBuilderThread(QThread):
         '.cargo/registry',
         '.cargo/git',
         'go/pkg',
-        # Steam
+        '.composer',
+        '.gem',
+        '.nuget',
+        # Steam and games
         '.steam',
         '.local/share/Steam',
-        # IDE/Editor files
+        '.local/share/lutris',
+        '.wine',
+        # IDE/Editor files and application data (can be very large)
         '.idea',
+        '.IntelliJIdea*',
+        '.PyCharm*',
+        '.WebStorm*',
+        '.CLion*',
+        '.PhpStorm*',
+        '.RubyMine*',
+        '.AndroidStudio*',
         '.vscode',
         '.vs',
         '.vim',
+        '.config/nvim',
+        '.local/share/nvim',
+        '.emacs.d',
+        '.emacs',
         '.venv',
+        'venv',
+        'env',
         '.env',
         '.viminfo',
+        '*.swp',
+        '*.swo',
+        '*.swn',
+        '*~',
         '.sublime-*',
         '.atom',
+        # IDE application data directories (very large)
+        '.config/Cursor',
+        '.config/Code',
+        '.config/Code - OSS',
+        '.config/RedisInsight',
+        '.config/Upscayl',
+        '.config/Antigravity',
+        '.config/Electron',
+        '.config/unity3d',
+        '.config/libreoffice',
+        '.config/GIMP',
+        '.config/gmic',
+        '.local/share/DBeaverData',
+        '.local/share/GitKrakenCLI',
+        '.local/share/Paradox Interactive',
+        '.local/share/Colossal Order',
+        # Media players and apps
+        '.config/spotify',
+        '.cache/spotify',
+        '.config/zoom',
+        '.zoom',
+        # Cloud sync folders
+        '.dropbox',
+        '.nextcloud',
+        '.nextcloud-client',
         # Log files
         '*.log',
         '.logs',
-        # Lock files
+        # Lock and backup files
         '*.lock',
         '.lock',
+        '*.bak',
+        '*.backup',
+        '*.orig',
+        '.recovery',
+        # OS/system-specific files
         '.DS_Store',
         'Thumbs.db',
+        '.Trash-*',
+        '.Xauthority',
     ]
     # Directories to include when copying user template (focus on configs)
     HOME_COPY_INCLUDES = [
@@ -131,10 +215,19 @@ class ISOBuilderThread(QThread):
         '.mozilla/firefox/*/cache',
         '.config/google-chrome/*/Cache',
         '.config/google-chrome/*/cache',
+        # Google Chrome large data directories (exclude large folders like OptGuideOnDeviceModel)
+        '.config/google-chrome/*/OptGuideOnDeviceModel',
+        '.config/google-chrome/*/optimization_guide_model_store',
+        '.config/google-chrome/*/component_crx_cache',
+        '.config/google-chrome/*/WasmTtsEngine',
+        '.config/google-chrome/*/Safe Browsing',
         '.config/chromium/*/Cache',
         '.config/chromium/*/cache',
+        '.config/chromium/*/OptGuideOnDeviceModel',
+        '.config/chromium/*/optimization_guide_model_store',
         '.config/BraveSoftware/*/Cache',
         '.config/BraveSoftware/*/cache',
+        '.config/BraveSoftware/*/OptGuideOnDeviceModel',
         # Temp directories
         'tmp',
         'temp',
@@ -150,6 +243,26 @@ class ISOBuilderThread(QThread):
         '.cargo/registry',
         '.cargo/git',
         '.pip',
+        # Arch-specific package manager caches (can be very large)
+        '.cache/yay',
+        '.cache/paru',
+        '.cache/pamac',
+        '.cache/pacman',
+        # Application caches (can be very large)
+        '.cache/yarn',
+        '.cache/pip',
+        '.cache/npm',
+        '.cache/electron',
+        '.cache/mozilla',
+        '.cache/google-chrome',
+        '.cache/BraveSoftware',
+        '.cache/chromium',
+        '.cache/Code',
+        '.cache/Cursor',
+        '.cache/gnome-software',
+        '.cache/ms-playwright-go',
+        '.cache/node-gyp',
+        '.cache/nvidia',
         # Build artifacts
         'node_modules',
         '__pycache__',
@@ -178,9 +291,46 @@ class ISOBuilderThread(QThread):
         '.viminfo',
         '.sublime-*',
         '.atom',
+        # IDE application data directories (very large)
+        '.config/Cursor',
+        '.config/Code',
+        '.config/Code - OSS',
+        '.config/RedisInsight',
+        '.config/Upscayl',
+        '.config/Antigravity',
+        '.config/Electron',
+        '.config/unity3d',
+        '.config/libreoffice',
+        '.config/GIMP',
+        '.config/gmic',
+        '.local/share/DBeaverData',
+        '.local/share/Paradox Interactive',
+        '.local/share/Colossal Order',
+        # Flatpak/Snap application data
+        '.var',
+        '.local/share/flatpak',
+        '.local/share/applications',
+        # Container and VM data
+        '.local/share/containers',
+        '.local/share/docker',
+        '.local/share/podman',
+        '.local/share/libvirt',
+        # Flatpak runtime data
+        '.local/share/runtime',
         # Steam
         '.steam',
         '.local/share/Steam',
+        # Flatpak/Snap application data
+        '.var',
+        '.local/share/flatpak',
+        '.local/share/applications',
+        # Container and VM data
+        '.local/share/containers',
+        '.local/share/docker',
+        '.local/share/podman',
+        '.local/share/libvirt',
+        # Flatpak runtime data
+        '.local/share/runtime',
         # Log files
         '*.log',
         '*.log.*',
@@ -1168,11 +1318,11 @@ while read -r output status _; do
     continue
   fi
   preferred=$(xrandr --query | awk -v out="$output" '
-    $1 == out {active=1; next}
-    active && $0 ~ /^[[:space:]]+[0-9]+x[0-9]+/ {
-      if ($0 ~ /\\+/) {print $1; exit}
-    }
-    active && $0 !~ /^[[:space:]]/ {active=0}
+    $1 == out {{active=1; next}}
+    active && $0 ~ /^[[:space:]]+[0-9]+x[0-9]+/ {{
+      if ($0 ~ /\\+/) {{print $1; exit}}
+    }}
+    active && $0 !~ /^[[:space:]]/ {{active=0}}
   ')
   if [[ -n "$preferred" ]]; then
     xrandr --output "$output" --mode "$preferred" --rate 60 2>/dev/null || \
@@ -1180,7 +1330,7 @@ while read -r output status _; do
   else
     xrandr --output "$output" --auto 2>/dev/null || true
   fi
-done < <(xrandr --query | awk '/ connected / {print $1 " connected"}')
+done < <(xrandr --query | awk '/ connected / {{print $1 " connected"}}')
 EOF
 chmod 755 /usr/local/bin/set-optimal-resolution.sh
 
