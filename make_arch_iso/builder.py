@@ -4,7 +4,7 @@ import subprocess
 from pathlib import Path
 from typing import List, Tuple
 
-from .qt_compat import QThread, pyqtSignal
+from PyQt6.QtCore import QThread, pyqtSignal
 from .constants import Messages
 from .utils import run_command, safe_remove, safe_makedirs
 
@@ -359,6 +359,34 @@ class ISOBuilderThread(QThread):
         self._write_text(path, content)
         os.chmod(path, 0o755)
 
+    def _get_scripts_dir(self) -> str:
+        """Get the path to the scripts directory"""
+        # Scripts directory is in the project root, relative to this file
+        # __file__ is at make_arch_iso/builder.py, need to go up 2 levels to project root
+        scripts_dir = os.path.join(
+            os.path.dirname(os.path.dirname(__file__)),
+            'scripts'
+        )
+        return scripts_dir
+
+    def _load_script_template(self, script_name: str) -> str:
+        """Load a script template from the scripts directory"""
+        scripts_dir = self._get_scripts_dir()
+        script_path = os.path.join(scripts_dir, script_name)
+        if not os.path.exists(script_path):
+            raise FileNotFoundError(
+                f"Script template not found: {script_path}"
+            )
+        with open(script_path, 'r', encoding='utf-8') as f:
+            return f.read()
+
+    def _template_replace(self, content: str, replacements: dict) -> str:
+        """Replace template placeholders in content"""
+        result = content
+        for key, value in replacements.items():
+            result = result.replace(f'{{{key}}}', str(value))
+        return result
+
     def _make_rsync_excludes(self, patterns: List[str]) -> List[str]:
         return [f'--exclude={pattern}' for pattern in patterns]
 
@@ -386,11 +414,15 @@ class ISOBuilderThread(QThread):
 
         base_package_set = set(base_packages)
 
+        # Get CachyOS kernel info from config if available
+        is_cachyos = getattr(self, '_is_cachyos', False)
+        cachyos_kernel = getattr(self, '_cachyos_kernel', None)
+
         required_packages = {
             'mkinitcpio',
             'mkinitcpio-archiso',
             'squashfs-tools',
-            'linux',
+            'linux' if not is_cachyos else (cachyos_kernel or 'linux-cachyos'),
             'linux-firmware',
             'base',
         }
@@ -450,61 +482,25 @@ class ISOBuilderThread(QThread):
         pkg_count = len(pkg_lines)
         return pkg_file, pkg_lines, pkg_count, required_packages
 
-    # Makes the built ISO boot into GNOME as root
+    # Makes the built ISO boot into GNOME with configured user
     def _write_customize_airootfs(
-        self, airootfs: str, root_password: str
+        self, airootfs: str, root_password: str, username: str = None,
+        user_password: str = None, user_sudo: bool = True,
+        template_user: str = None
     ) -> None:
         customize_path = os.path.join(
             airootfs, 'root', 'customize_airootfs.sh'
         )
-        content = f"""#!/bin/bash
-set -euo pipefail
-
-echo "[customize_airootfs] running..."
-
-# 1) Set root password
-echo "root:{root_password}" | chpasswd
-
-# 2) Restore root home from template (if present)
-TEMPLATE_DIR="/etc/skel/root_template"
-if [[ -d "$TEMPLATE_DIR" ]]; then
-  rsync -a "$TEMPLATE_DIR/" /root/ || true
-  chown -R root:root /root || true
-fi
-
-# 3) Networking
-systemctl enable NetworkManager.service || true
-
-# 4) Ensure video drivers are loaded (KMS modules are in mkinitcpio)
-# The video driver modules (i915, amdgpu, radeon, nvidia) are already
-# configured in mkinitcpio.conf for early loading during boot
-
-# 5) GNOME Display Manager + graphical boot
-if pacman -Qq gdm &>/dev/null; then
-  systemctl enable gdm.service || true
-
-  # Autologin as root
-  mkdir -p /etc/gdm
-  cat > /etc/gdm/custom.conf <<EOF
-[daemon]
-AutomaticLoginEnable=True
-AutomaticLogin=root
-
-[security]
-
-[xdmcp]
-
-[chooser]
-
-[debug]
-EOF
-fi
-
-# Ensure we boot to graphical target by default
-ln -sf /usr/lib/systemd/system/graphical.target /etc/systemd/system/default.target || true
-
-echo "[customize_airootfs] done."
-"""
+        # Load template from scripts directory
+        content = self._load_script_template('customize_airootfs.sh')
+        # Replace template placeholders
+        content = self._template_replace(content, {
+            'ROOT_PASSWORD': root_password,
+            'USERNAME': username or '',
+            'USER_PASSWORD': user_password or '',
+            'USER_SUDO': 'true' if user_sudo else 'false',
+            'TEMPLATE_USER': template_user or ''
+        })
         self._write_script(customize_path, content)
 
     def run(self):
@@ -514,6 +510,37 @@ echo "[customize_airootfs] done."
             if os.geteuid() != 0:
                 self.finished_signal.emit(False, Messages.ROOT_REQUIRED)
                 return
+
+            # Detect CachyOS and kernel variant
+            self._is_cachyos = False
+            self._cachyos_kernel = None
+            result = run_command(['pacman', '-Q'], check=False)
+            if result.returncode == 0:
+                installed_packages = result.stdout
+                # Check for CachyOS kernel packages (linux-cachyos, linux-cachyos-bore, etc.)
+                cachyos_kernel_patterns = [
+                    'linux-cachyos ',  # Default CachyOS kernel
+                    'linux-cachyos-bore ',
+                    'linux-cachyos-bmq ',
+                    'linux-cachyos-deckify ',
+                    'linux-cachyos-eevdf ',
+                    'linux-cachyos-lts ',
+                    'linux-cachyos-hardened ',
+                    'linux-cachyos-rc ',
+                    'linux-cachyos-server ',
+                    'linux-cachyos-rt-bore ',
+                ]
+                for pattern in cachyos_kernel_patterns:
+                    if pattern in installed_packages:
+                        # Extract kernel name (remove version)
+                        kernel_line = [p for p in installed_packages.split('\n') if pattern.strip() in p]
+                        if kernel_line:
+                            self._cachyos_kernel = kernel_line[0].split()[0]
+                            self._is_cachyos = True
+                            self._emit(
+                                f"[INFO] Detected CachyOS kernel: {self._cachyos_kernel}\n"
+                            )
+                            break
 
             work_dir = self.config['work_dir']
             output_dir = self.config['output_dir']
@@ -694,8 +721,10 @@ echo "[customize_airootfs] done."
                                 self._emit(
                                     f"  - Copying {pkg_file.name}\n"
                                 )
+                                # Use cp with --reflink=auto for faster copies on COW filesystems
+                                # Falls back to normal copy if reflink not supported
                                 subprocess.run(
-                                    ['cp', str(pkg_file), local_repo_dir],
+                                    ['cp', '--reflink=auto', str(pkg_file), local_repo_dir],
                                     check=False
                                 )
                                 successfully_copied_aur.append(pkg)
@@ -812,10 +841,28 @@ echo "[customize_airootfs] done."
 
             # Define conflicting package groups (only one from each group can be installed)
             conflict_groups = [
-                # NVIDIA driver packages - only one can be installed
+                # NVIDIA driver packages - modern drivers take priority
+                # nvidia (proprietary) and nvidia-open (open-source) are the primary options
+                # Legacy DKMS drivers (580xx, 470xx, 390xx, 340xx) only for very old hardware
                 ['nvidia', 'nvidia-open', 'nvidia-580xx-dkms', 'nvidia-470xx-dkms',
                  'nvidia-390xx-dkms', 'nvidia-340xx-dkms'],
             ]
+
+            # Detect which NVIDIA driver is installed on current system (for intelligent defaults)
+            detected_nvidia_driver = None
+            result = run_command(['pacman', '-Q', 'nvidia', 'nvidia-open'], check=False)
+            if result.returncode == 0:
+                # Check stdout for which one is installed
+                if 'nvidia ' in result.stdout:
+                    detected_nvidia_driver = 'nvidia'
+                elif 'nvidia-open ' in result.stdout:
+                    detected_nvidia_driver = 'nvidia-open'
+            else:
+                # Try checking if either is in the package list
+                if 'nvidia' in packages and 'nvidia-open' not in packages:
+                    detected_nvidia_driver = 'nvidia'
+                elif 'nvidia-open' in packages:
+                    detected_nvidia_driver = 'nvidia-open'
 
             # Check for existing conflicting packages in the package list
             existing_nvidia = None
@@ -841,12 +888,50 @@ echo "[customize_airootfs] done."
                 "gdm",
                 "networkmanager",
                 "mesa",
-                # Video driver packages for various hardware (bleeding-edge)
-                "xf86-video-intel",  # Intel integrated graphics
-                "xf86-video-amdgpu",  # AMD GPUs (modern)
-                "xf86-video-ati",  # Older AMD/ATI GPUs
-                "nvidia-open",  # NVIDIA open kernel modules (bleeding-edge)
+                # Video driver packages for various hardware
+                "xf86-video-amdgpu",  # AMD GPUs (modern, replaces xf86-video-ati)
+                # Note: xf86-video-intel is deprecated, Intel uses modesetting driver
+                # Note: xf86-video-ati is deprecated, replaced by xf86-video-amdgpu
+                # Audio drivers and firmware
+                "pipewire",
+                "pipewire-alsa",
+                "pipewire-pulse",
+                "wireplumber",
+                "alsa-utils",
+                "sof-firmware",  # Intel audio firmware (many modern systems)
+                # Network/WiFi drivers and utilities
+                "iwd",  # Modern wireless daemon
+                "wpa_supplicant",  # WiFi authentication (backup/compatibility)
+                # linux-firmware is already in required_packages, but list for clarity
             ]
+
+            # Add sudo if user account with sudo access is configured
+            user_config = self.config.get('user_config', {})
+            username = user_config.get('username', '')
+            user_sudo = user_config.get('user_sudo', False)
+            if username and user_sudo:
+                if 'sudo' not in packages and 'sudo' not in gui_must:
+                    gui_must.append('sudo')
+                    self._emit(
+                        "[INFO] Adding 'sudo' package for user account with sudo access.\n"
+                    )
+
+            # Add NVIDIA driver based on what's detected/installed
+            # Prefer proprietary nvidia over nvidia-open for better compatibility
+            if detected_nvidia_driver:
+                if detected_nvidia_driver not in packages:
+                    gui_must.append(detected_nvidia_driver)
+                    self._emit(
+                        f"[INFO] Detected NVIDIA driver on system: "
+                        f"{detected_nvidia_driver}, will include in ISO.\n"
+                    )
+            # If no NVIDIA driver detected but nvidia package exists, use it
+            elif 'nvidia' in packages and 'nvidia-open' not in packages:
+                # Don't add to gui_must, already in packages
+                pass
+            elif 'nvidia-open' in packages:
+                # Don't add to gui_must, already in packages
+                pass
 
             added_gui = []
             for must in gui_must:
@@ -952,6 +1037,66 @@ echo "[customize_airootfs] done."
                 "archiso-live\n"
             )
 
+            # Disable PC speaker beep by blacklisting module early via kernel parameter
+            # This will be added to all kernel command lines in GRUB/efiboot configs
+            # We'll add it via archiso's kernel parameters in boot configs
+            self._emit(
+                "[INFO] Configuring boot options to disable motherboard speaker...\n"
+            )
+
+            # Add kernel parameter to bootloader configs if they exist
+            # archiso uses grub/ and efiboot/ directories for boot configs
+            grub_dir = os.path.join(profile_dir, 'grub')
+            efiboot_dir = os.path.join(profile_dir, 'efiboot')
+
+            kernel_params = ' modprobe.blacklist=pcspkr'
+
+            # Modify GRUB config files
+            if os.path.exists(grub_dir):
+                for grub_cfg in Path(grub_dir).rglob('*.cfg'):
+                    try:
+                        with open(grub_cfg, 'r', encoding='utf-8') as f:
+                            content = f.read()
+                        # Add kernel parameter to linux entries
+                        # Match lines like: linux ... archisobasedir=arch ...
+                        modified_content = []
+                        for line in content.split('\n'):
+                            if line.strip().startswith('linux') and 'archisobasedir' in line:
+                                # Add modprobe.blacklist=pcspkr if not already present
+                                if 'modprobe.blacklist=pcspkr' not in line:
+                                    # Add before archisobasedir or at end of options
+                                    if 'archisobasedir=' in line:
+                                        line = line.replace('archisobasedir=', kernel_params + ' archisobasedir=')
+                                    else:
+                                        line = line.rstrip() + kernel_params
+                            modified_content.append(line)
+                        with open(grub_cfg, 'w', encoding='utf-8') as f:
+                            f.write('\n'.join(modified_content))
+                    except Exception as e:
+                        self._emit(
+                            f"[WARN] Could not modify GRUB config {grub_cfg}: {e}\n"
+                        )
+
+            # Modify efiboot/systemd-boot config files
+            if os.path.exists(efiboot_dir):
+                for boot_cfg in Path(efiboot_dir).rglob('*.conf'):
+                    try:
+                        with open(boot_cfg, 'r', encoding='utf-8') as f:
+                            content = f.read()
+                        modified_content = []
+                        for line in content.split('\n'):
+                            if line.strip().startswith('options ') and 'archisobasedir' in line:
+                                # Add modprobe.blacklist=pcspkr if not already present
+                                if 'modprobe.blacklist=pcspkr' not in line:
+                                    line = line.rstrip() + kernel_params
+                            modified_content.append(line)
+                        with open(boot_cfg, 'w', encoding='utf-8') as f:
+                            f.write('\n'.join(modified_content))
+                    except Exception as e:
+                        self._emit(
+                            f"[WARN] Could not modify boot config {boot_cfg}: {e}\n"
+                        )
+
             # Configure mkinitcpio for video drivers (early KMS)
             self._emit(
                 "[INFO] Configuring mkinitcpio for video drivers...\n"
@@ -995,6 +1140,40 @@ HOOKS=(base udev autodetect modconf block filesystems keyboard fsck)
 #COMPRESSION="gzip"
 """
 
+            # Determine which modules to include based on packages
+            # Check final package list for video drivers
+            modules_list = ['i915', 'amdgpu', 'radeon']
+
+            # Only add nvidia module if nvidia or nvidia-open driver is in packages
+            # Check for actual driver packages, not utility packages
+            has_nvidia = any(
+                pkg in ['nvidia', 'nvidia-open'] or
+                (pkg.startswith('nvidia-') and pkg.endswith('-dkms'))
+                for pkg in packages
+            )
+            if has_nvidia:
+                modules_list.append('nvidia')
+                self._emit(
+                    "[INFO] NVIDIA driver detected - adding nvidia module to "
+                    "mkinitcpio for early KMS.\n"
+                )
+
+            # Add audio and network modules for early loading
+            # These ensure hardware works in live session
+            audio_modules = ['snd_hda_intel', 'snd_sof_pci', 'snd_sof_intel_hda_common']
+            network_modules = ['iwlwifi', 'r8169', 'e1000e', 'igb', 'ath10k_pci', 'ath9k', 'rtw89']
+
+            # Add commonly needed modules (these are generic and won't hurt)
+            modules_list.extend(audio_modules)
+            modules_list.extend(network_modules)
+
+            self._emit(
+                "[INFO] Adding audio and network modules to mkinitcpio for "
+                "live session compatibility.\n"
+            )
+
+            modules_str = ' '.join(modules_list)
+
             # Modify MODULES line to include video drivers for early KMS
             lines = mkinitcpio_content.split('\n')
             modified_lines = []
@@ -1003,10 +1182,9 @@ HOOKS=(base udev autodetect modconf block filesystems keyboard fsck)
                 stripped = line.strip()
                 if (stripped.startswith('MODULES=') and
                         not stripped.startswith('# MODULES')):
-                    # Update MODULES to include video drivers for early KMS
-                    # (Intel, AMD, NVIDIA)
+                    # Update MODULES to include detected video drivers for early KMS
                     modified_lines.append(
-                        'MODULES=(i915 amdgpu radeon nvidia)'
+                        f'MODULES=({modules_str})'
                     )
                     modules_updated = True
                 else:
@@ -1024,7 +1202,7 @@ HOOKS=(base udev autodetect modconf block filesystems keyboard fsck)
                         ):
                             j += 1
                         modified_lines.insert(
-                            j, 'MODULES=(i915 amdgpu radeon nvidia)'
+                            j, f'MODULES=({modules_str})'
                         )
                         break
 
@@ -1032,12 +1210,15 @@ HOOKS=(base udev autodetect modconf block filesystems keyboard fsck)
                 mkinitcpio_conf, '\n'.join(modified_lines) + '\n'
             )
 
-            # Configure root user account (only user on live ISO)
+            # Configure user accounts
             user_config = self.config.get('user_config', {})
+            username = user_config.get('username', 'archuser')
+            user_password = user_config.get('user_password', 'arch')
             root_password = user_config.get('root_password', 'root')
+            user_sudo = user_config.get('user_sudo', True)
             template_user = user_config.get('template_user', None)
 
-            # Copy selected user's home as template for root
+            # Copy selected user's home as template for the configured user
             if template_user:
                 self._emit(
                     f"[INFO] Copying user template from: {template_user}\n"
@@ -1051,10 +1232,16 @@ HOOKS=(base udev autodetect modconf block filesystems keyboard fsck)
                         "[INFO] Proceeding without user template\n"
                     )
                 else:
-                    # Copy user home to root template directory
-                    dest_template = os.path.join(
-                        airootfs, 'etc', 'skel', 'root_template'
-                    )
+                    # Copy user home to template directory for configured user
+                    if username:
+                        dest_template = os.path.join(
+                            airootfs, 'etc', 'skel', f'user_template_{template_user}'
+                        )
+                    else:
+                        # Fallback to root template if no username configured
+                        dest_template = os.path.join(
+                            airootfs, 'etc', 'skel', 'root_template'
+                        )
                     os.makedirs(dest_template, exist_ok=True)
 
                     exclude_patterns = self._make_rsync_excludes(
@@ -1066,11 +1253,14 @@ HOOKS=(base udev autodetect modconf block filesystems keyboard fsck)
                         "(focusing on configs) "
                         f"from {source_home}...\n"
                     )
-                    # Use rsync with excludes - this will copy everything
-                    # except excluded patterns (cache, trash, etc.)
-                    # which naturally includes .config (GTK/QT configs)
+                    # Use rsync with excludes - optimized for speed
+                    # Use --no-perms/--no-owner for faster copying (permissions set later)
+                    # --inplace avoids creating temporary files for better performance
+                    # --partial allows resuming if interrupted
                     rsync_cmd = (
-                        ['rsync', '-a', '--info=progress2'] +
+                        ['rsync', '-a', '--info=progress2',
+                         '--numeric-ids', '--no-perms', '--no-owner', '--no-group',
+                         '--inplace', '--partial', '--no-inc-recursive'] +
                         exclude_patterns +
                         [f'{source_home}/', f'{dest_template}/']
                     )
@@ -1089,14 +1279,23 @@ HOOKS=(base udev autodetect modconf block filesystems keyboard fsck)
                             "[WARN] Some files may not have been copied\n"
                         )
             else:
-                self._emit(
-                    "[INFO] No user template selected - "
-                    "using blank root home\n"
-                )
+                if username:
+                    self._emit(
+                        "[INFO] No user template selected - "
+                        f"user {username} will have blank home directory\n"
+                    )
+                else:
+                    self._emit(
+                        "[INFO] No user template selected - "
+                        "using blank root home\n"
+                    )
 
             # mkarchiso executes customize_airootfs.sh during build
-            # This sets root password + restores template + enables GDM
-            self._write_customize_airootfs(airootfs, root_password)
+            # This creates user account, sets passwords, restores templates, enables GDM
+            self._write_customize_airootfs(
+                airootfs, root_password, username, user_password,
+                user_sudo, template_user
+            )
 
             # Write pkg list into ISO for installer to use
             self._write_text(
@@ -1111,275 +1310,23 @@ HOOKS=(base udev autodetect modconf block filesystems keyboard fsck)
             install_script = os.path.join(
                 airootfs, 'root', 'Desktop', 'install.sh'
             )
-            self._write_script(install_script, f"""#!/bin/bash
-set -euo pipefail
+            # Load template from scripts directory
+            install_content = self._load_script_template('install.sh')
+            # Replace template placeholders
+            install_content = self._template_replace(install_content, {
+                'ROOT_PASSWORD': root_password,
+                'USERNAME': username or '',
+                'USER_PASSWORD': user_password or '',
+                'USER_SUDO': 'true' if user_sudo else 'false'
+            })
+            self._write_script(install_script, install_content)
 
-# Custom Arch installer (UEFI, GPT, EFI+root)
-# WARNING: this wipes the selected disk.
-
-ROOT_PASSWORD="{root_password}"
-HOSTNAME="arch-custom"
-TIMEZONE="America/Denver"
-LOCALE="en_US.UTF-8"
-
-PKGLIST="/root/pkglist.txt"
-
-echo "========================================"
-echo "  Custom Arch Installer (UEFI, GPT)"
-echo "========================================"
-echo
-lsblk -dpno NAME,SIZE,MODEL | sed 's/^/  /'
-echo
-read -r -p "Install to which disk (e.g. /dev/nvme0n1 or /dev/sda)? " DISK
-if [[ ! -b "$DISK" ]]; then
-  echo "ERROR: $DISK is not a block device"
-  exit 1
-fi
-
-echo
-echo "ABOUT TO WIPE: $DISK"
-read -r -p "Type WIPE to confirm: " CONF
-if [[ "$CONF" != "WIPE" ]]; then
-  echo "Cancelled."
-  exit 0
-fi
-
-# Basic sanity: require UEFI for systemd-boot path
-if [[ ! -d /sys/firmware/efi/efivars ]]; then
-  echo "ERROR: This script expects UEFI boot (no /sys/firmware/efi)."
-  echo "If you need BIOS/GRUB support, modify bootloader section."
-  exit 1
-fi
-
-echo "[1/8] Partitioning..."
-sgdisk --zap-all "$DISK"
-sgdisk -n 1:0:+512M -t 1:ef00 -c 1:"EFI" "$DISK"
-sgdisk -n 2:0:0      -t 2:8300 -c 2:"ROOT" "$DISK"
-partprobe "$DISK"
-sleep 2
-
-# Handle nvme/mmc partition naming
-EFI_PART="${{DISK}}1"
-ROOT_PART="${{DISK}}2"
-if [[ "$DISK" =~ nvme|mmcblk ]]; then
-  EFI_PART="${{DISK}}p1"
-  ROOT_PART="${{DISK}}p2"
-fi
-
-echo "[2/8] Formatting..."
-mkfs.fat -F32 "$EFI_PART"
-mkfs.ext4 -F "$ROOT_PART"
-
-echo "[3/8] Mounting..."
-mount "$ROOT_PART" /mnt
-mkdir -p /mnt/boot
-mount "$EFI_PART" /mnt/boot
-
-echo "[4/8] Installing base system..."
-if [[ ! -f "$PKGLIST" ]]; then
-  echo "WARN: $PKGLIST not found; installing minimal base only."
-  pacstrap -K /mnt base linux linux-firmware networkmanager
-else
-  # Use current live pacman.conf (includes local-repo if you built it)
-  pacstrap -K -C /etc/pacman.conf /mnt $(grep -v '^#' "$PKGLIST" | xargs)
-fi
-
-echo "[5/8] fstab..."
-genfstab -U /mnt >> /mnt/etc/fstab
-
-echo
-echo "========================================"
-echo "  Video Driver Selection"
-echo "========================================"
-echo "Select your primary graphics driver:"
-echo "  1) Intel (i915)"
-echo "  2) AMD (amdgpu/radeon)"
-echo "  3) NVIDIA (nvidia)"
-echo "  4) All (recommended for multi-GPU systems)"
-echo
-read -r -p "Enter choice [1-4] (default: 4): " DRIVER_CHOICE
-DRIVER_CHOICE=${{DRIVER_CHOICE:-4}}
-
-case "$DRIVER_CHOICE" in
-  1)
-    MKINITCPIO_MODULES="i915"
-    REMOVE_DRIVERS="xf86-video-amdgpu xf86-video-ati nvidia-open"
-    ;;
-  2)
-    MKINITCPIO_MODULES="amdgpu radeon"
-    REMOVE_DRIVERS="xf86-video-intel nvidia-open"
-    ;;
-  3)
-    MKINITCPIO_MODULES="nvidia"
-    REMOVE_DRIVERS="xf86-video-intel xf86-video-amdgpu xf86-video-ati"
-    ;;
-  4|*)
-    MKINITCPIO_MODULES="i915 amdgpu radeon nvidia"
-    REMOVE_DRIVERS=""
-    ;;
-esac
-
-# Common modules for audio + networking
-COMMON_MODULES="snd_hda_intel snd_sof_pci snd_sof_intel_hda_common iwlwifi r8169 e1000e igb"
-ALL_MODULES="$MKINITCPIO_MODULES $COMMON_MODULES"
-
-echo "[6/8] System config (chroot)..."
-arch-chroot /mnt /bin/bash -euo pipefail <<CHROOT
-echo "root:${{ROOT_PASSWORD}}" | chpasswd
-
-ln -sf "/usr/share/zoneinfo/${{TIMEZONE}}" /etc/localtime
-hwclock --systohc
-
-sed -i "s/^#${{LOCALE}}/${{LOCALE}}/" /etc/locale.gen || true
-locale-gen
-echo "LANG=${{LOCALE}}" > /etc/locale.conf
-
-echo "${{HOSTNAME}}" > /etc/hostname
-cat > /etc/hosts <<EOF
-127.0.0.1   localhost
-::1         localhost
-127.0.1.1   ${{HOSTNAME}}.localdomain ${{HOSTNAME}}
-EOF
-
-# Configure video drivers based on selection
-MKINITCPIO_MODULES="${{MKINITCPIO_MODULES}}"
-REMOVE_DRIVERS="${{REMOVE_DRIVERS}}"
-COMMON_MODULES="${{COMMON_MODULES}}"
-ALL_MODULES="${{ALL_MODULES}}"
-
-# Ensure core firmware, audio, and networking packages are present
-pacman -Syu --noconfirm --needed \\
-  linux-firmware sof-firmware \\
-  networkmanager iwd wpa_supplicant \\
-  pipewire pipewire-alsa pipewire-pulse wireplumber alsa-utils || true
-
-if grep -q "GenuineIntel" /proc/cpuinfo; then
-  pacman -S --noconfirm --needed intel-ucode || true
-elif grep -q "AuthenticAMD" /proc/cpuinfo; then
-  pacman -S --noconfirm --needed amd-ucode || true
-fi
-
-if [[ "$MKINITCPIO_MODULES" == *nvidia* ]]; then
-  pacman -S --noconfirm --needed nvidia nvidia-utils || true
-fi
-
-if [[ -n "$MKINITCPIO_MODULES" ]]; then
-  echo "Configuring mkinitcpio with modules: $MKINITCPIO_MODULES"
-  sed -i "s/^MODULES=.*/MODULES=($MKINITCPIO_MODULES)/" /etc/mkinitcpio.conf || true
-  mkinitcpio -P || true
-fi
-
-if [[ -n "$ALL_MODULES" ]]; then
-  echo "Ensuring common modules load on boot: $ALL_MODULES"
-  cat > /etc/modules-load.d/custom-arch-iso.conf <<EOF
-$ALL_MODULES
-EOF
-fi
-
-# Remove unneeded driver packages if specified
-if [[ -n "$REMOVE_DRIVERS" ]]; then
-  echo "Removing unneeded driver packages: $REMOVE_DRIVERS"
-  pacman -Rns --noconfirm $REMOVE_DRIVERS 2>/dev/null || true
-fi
-
-# Remove deprecated video drivers if present
-pacman -Rns --noconfirm xf86-video-intel xf86-video-ati 2>/dev/null || true
-
-# Ensure only the latest kernel package remains
-pacman -S --noconfirm --needed linux || true
-pacman -Rns --noconfirm \\
-  linux-lts linux-zen linux-hardened linux-rt \\
-  linux-lts-headers linux-zen-headers linux-hardened-headers linux-rt-headers \\
-  2>/dev/null || true
-
-# Services
-systemctl enable NetworkManager.service || true
-if pacman -Qq gdm &>/dev/null; then
-  systemctl enable gdm.service || true
-  mkdir -p /etc/gdm
-  cat > /etc/gdm/custom.conf <<EOF
-[daemon]
-AutomaticLoginEnable=True
-AutomaticLogin=root
-EOF
-fi
-
-# Ensure optimal screen resolution on first login
-cat > /usr/local/bin/set-optimal-resolution.sh <<'EOF'
-#!/bin/bash
-set -euo pipefail
-
-if ! command -v xrandr >/dev/null 2>&1; then
-  exit 0
-fi
-
-while read -r output status _; do
-  if [[ "$status" != "connected" ]]; then
-    continue
-  fi
-  preferred=$(xrandr --query | awk -v out="$output" '
-    $1 == out {{active=1; next}}
-    active && $0 ~ /^[[:space:]]+[0-9]+x[0-9]+/ {{
-      if ($0 ~ /\\+/) {{print $1; exit}}
-    }}
-    active && $0 !~ /^[[:space:]]/ {{active=0}}
-  ')
-  if [[ -n "$preferred" ]]; then
-    xrandr --output "$output" --mode "$preferred" --rate 60 2>/dev/null || \
-      xrandr --output "$output" --mode "$preferred" 2>/dev/null || true
-  else
-    xrandr --output "$output" --auto 2>/dev/null || true
-  fi
-done < <(xrandr --query | awk '/ connected / {{print $1 " connected"}}')
-EOF
-chmod 755 /usr/local/bin/set-optimal-resolution.sh
-
-mkdir -p /etc/xdg/autostart
-cat > /etc/xdg/autostart/set-optimal-resolution.desktop <<EOF
-[Desktop Entry]
-Type=Application
-Name=Set Optimal Resolution
-Exec=/usr/local/bin/set-optimal-resolution.sh
-Terminal=false
-X-GNOME-Autostart-enabled=true
-EOF
-
-# Bootloader: systemd-boot
-bootctl install
-ROOT_UUID=\\$(blkid -s UUID -o value "{'{'}ROOT_PART{'}'}")
-cat > /boot/loader/loader.conf <<EOF
-default arch
-timeout 3
-beep   off
-editor  0
-EOF
-
-cat > /boot/loader/entries/arch.conf <<EOF
-title   Arch Linux (Custom)
-linux   /vmlinuz-linux
-initrd  /initramfs-linux.img
-options root=UUID=\\${{ROOT_UUID}} rw
-EOF
-CHROOT
-
-echo "[7/8] Done. Unmounting..."
-umount -R /mnt
-
-echo "[8/8] Installation complete."
-echo "Reboot when ready."
-""")
+            # Create desktop shortcut
             desktop_shortcut = os.path.join(
                 airootfs, 'root', 'Desktop', 'Install Arch.desktop'
             )
-            self._write_text(desktop_shortcut, """[Desktop Entry]
-Type=Application
-Name=Install Arch Linux
-Comment=Run the custom Arch installer
-Exec=/root/Desktop/install.sh
-Terminal=true
-Icon=utilities-terminal
-Categories=System;
-""")
+            desktop_content = self._load_script_template('Install Arch.desktop')
+            self._write_text(desktop_shortcut, desktop_content)
             os.chmod(desktop_shortcut, 0o755)
             self.progress_signal.emit(50)
 
@@ -1420,6 +1367,10 @@ Categories=System;
                 with open(profiledef, 'r', encoding='utf-8') as f:
                     lines = f.readlines()
 
+            # Get compression settings from config (default to faster zstd)
+            compression_type = self.config.get('compression_type', 'zstd')
+            compression_level = self.config.get('compression_level', None)
+
             updated_lines = []
             for line in lines:
                 stripped = line.strip()
@@ -1435,6 +1386,39 @@ Categories=System;
                     )
                 elif stripped.startswith('pacman_conf='):
                     updated_lines.append('pacman_conf="pacman.conf"\n')
+                elif stripped.startswith('bootmodes='):
+                    # Preserve original bootmodes, or set default if not present
+                    # This ensures GRUB is configured properly
+                    if 'bootmodes=' not in '\n'.join(updated_lines):
+                        updated_lines.append(line)
+                elif stripped.startswith('COMPRESSION=') or stripped.startswith('#COMPRESSION='):
+                    # Set compression type for squashfs (much faster builds)
+                    if compression_type == 'zstd':
+                        # Zstd: faster compression/decompression, good ratio
+                        if compression_level:
+                            updated_lines.append(f'COMPRESSION="zstd -Xcompression-level {compression_level}"\n')
+                        else:
+                            # Default level 6: good balance of speed and size
+                            updated_lines.append('COMPRESSION="zstd -Xcompression-level 6"\n')
+                    elif compression_type == 'gzip':
+                        # Gzip: faster than xz, better than zstd at low levels
+                        if compression_level:
+                            updated_lines.append(f'COMPRESSION="gzip -Xcompression-level {compression_level}"\n')
+                        else:
+                            updated_lines.append('COMPRESSION="gzip"\n')
+                    elif compression_type == 'xz':
+                        # XZ: slower but best compression (default archiso behavior)
+                        # Note: XZ compression level is set via -Xcompression-level
+                        if compression_level:
+                            updated_lines.append(
+                                f'COMPRESSION="xz -Xbcj x86 -Xdict-size 25% -Xcompression-level {compression_level}"\n'
+                            )
+                        else:
+                            # Default: no level specified (uses mkarchiso default)
+                            updated_lines.append('COMPRESSION="xz -Xbcj x86 -Xdict-size 25%"\n')
+                    else:
+                        # Default to zstd for speed
+                        updated_lines.append('COMPRESSION="zstd -Xcompression-level 6"\n')
                 else:
                     updated_lines.append(line)
 

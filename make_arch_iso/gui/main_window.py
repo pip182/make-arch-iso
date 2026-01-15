@@ -2,20 +2,27 @@
 import os
 import json
 import subprocess
+import time
+from datetime import datetime
 from pathlib import Path
 from typing import Tuple
 
-from ..qt_compat import (
+from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QPushButton, QLabel, QTextEdit, QLineEdit, QFileDialog,
     QProgressBar, QGroupBox, QCheckBox, QMessageBox,
-    QComboBox, QFont, QTextCursor, Qt, HAS_PYQT6
+    QComboBox
 )
+from PyQt6.QtGui import QFont, QTextCursor
+from PyQt6.QtCore import Qt
 from ..constants import Colors, LayoutSpacing, Paths, Messages
 from ..builder import ISOBuilderThread
 from ..usb_writer import USBWriterThread
-from ..utils import run_command, get_qt_dialog_code, create_app_icon
-from .dialogs import ExclusionsDialog, PackageSelectionDialog
+from ..utils import run_command, get_qt_dialog_code, create_app_icon, safe_makedirs
+from .dialogs import (
+    ExclusionsDialog, PackageSelectionDialog, BuildOptimizationDialog,
+    UserConfigurationDialog
+)
 
 
 class ISOBuilderGUI(QMainWindow):
@@ -82,7 +89,7 @@ class ISOBuilderGUI(QMainWindow):
         central_widget = QWidget()
         self.setCentralWidget(central_widget)
         main_layout = QVBoxLayout(central_widget)
-        main_layout.setSpacing(LayoutSpacing.MAIN_SPACING * 2)
+        main_layout.setSpacing(LayoutSpacing.SECTION_SPACING)
         main_layout.setContentsMargins(
             LayoutSpacing.MAIN_MARGINS,
             LayoutSpacing.MAIN_MARGINS,
@@ -92,7 +99,7 @@ class ISOBuilderGUI(QMainWindow):
 
         # Configuration Group
         config_group = QGroupBox('Configuration')
-        config_layout = self.create_group_layout()
+        config_layout = self.create_group_layout(spacing=LayoutSpacing.GROUP_SPACING)
 
         # ISO Name
         iso_name_layout = self.create_field_layout()
@@ -137,79 +144,28 @@ class ISOBuilderGUI(QMainWindow):
 
         # Directory Exclusions and Package Selection Buttons
         buttons_layout = QHBoxLayout()
-        exclude_btn = QPushButton(
-            'Configure Directory Exclusions...'
-        )
+        buttons_layout.setSpacing(LayoutSpacing.FIELD_SPACING)
+        exclude_btn = QPushButton('Exclusions...')
         exclude_btn.clicked.connect(self.show_exclusions_dialog)
         buttons_layout.addWidget(exclude_btn)
 
-        package_btn = QPushButton('Select Packages to Exclude...')
+        package_btn = QPushButton('Packages...')
         package_btn.clicked.connect(self.show_package_selection_dialog)
         buttons_layout.addWidget(package_btn)
+
+        optimization_btn = QPushButton('Optimization...')
+        optimization_btn.clicked.connect(self.show_optimization_dialog)
+        buttons_layout.addWidget(optimization_btn)
+
+        user_config_btn = QPushButton('User Config...')
+        user_config_btn.clicked.connect(self.show_user_config_dialog)
+        buttons_layout.addWidget(user_config_btn)
 
         buttons_layout.addStretch()
         config_layout.addLayout(buttons_layout)
 
         config_group.setLayout(config_layout)
         main_layout.addWidget(config_group)
-
-        # User Configuration - Separate Group
-        user_group = QGroupBox('User Configuration')
-        user_config_layout = self.create_group_layout(spacing=10)
-
-        # Info label
-        info_label = QLabel(
-            'Select a system user whose home directory will be used as a '
-            'template for the root user on the live ISO. The ISO will only '
-            'have a root user account.'
-        )
-        info_label.setWordWrap(True)
-        user_config_layout.addWidget(info_label)
-
-        # User template selection
-        user_template_layout = QHBoxLayout()
-        user_template_layout.addWidget(QLabel('User Template:'))
-
-        # User selection combo
-        self.user_source_combo = QComboBox()
-        self.user_source_combo.setMinimumWidth(250)
-        self.populate_user_list()
-        self.user_source_combo.currentIndexChanged.connect(self.save_settings)
-        user_template_layout.addWidget(self.user_source_combo)
-
-        # Refresh users button
-        refresh_users_btn = QPushButton('Refresh')
-        refresh_users_btn.clicked.connect(self.populate_user_list)
-        self.refresh_users_btn = refresh_users_btn
-        user_template_layout.addWidget(refresh_users_btn)
-
-        user_template_layout.addStretch()
-        user_config_layout.addLayout(user_template_layout)
-
-        # Root password field
-        root_password_layout = QHBoxLayout()
-        root_password_layout.addWidget(QLabel('Root Password:'))
-        self.root_password_input = QLineEdit()
-        if HAS_PYQT6:
-            self.root_password_input.setEchoMode(
-                QLineEdit.EchoMode.Password
-            )
-        else:
-            self.root_password_input.setEchoMode(QLineEdit.Password)
-        self.root_password_input.setMinimumHeight(
-            LayoutSpacing.MIN_INPUT_HEIGHT
-        )
-        self.root_password_input.setMinimumWidth(250)
-        self.root_password_input.setText(
-            self.settings.get('root_password', 'root')
-        )
-        self.root_password_input.textChanged.connect(self.save_settings)
-        root_password_layout.addWidget(self.root_password_input)
-        root_password_layout.addStretch()
-        user_config_layout.addLayout(root_password_layout)
-
-        user_group.setLayout(user_config_layout)
-        main_layout.addWidget(user_group)
 
         # USB Write Group
         usb_group = QGroupBox('Write to USB Drive (Optional)')
@@ -225,7 +181,7 @@ class ISOBuilderGUI(QMainWindow):
 
         # USB Device Selection
         usb_device_layout = QHBoxLayout()
-        usb_device_layout.setSpacing(10)
+        usb_device_layout.setSpacing(LayoutSpacing.FIELD_SPACING)
         usb_device_layout.addWidget(QLabel('USB Device:'))
         self.usb_device_combo = QComboBox()
         self.usb_device_combo.setMinimumWidth(300)
@@ -259,9 +215,7 @@ class ISOBuilderGUI(QMainWindow):
         # Update widget states based on checkbox settings
         # This ensures widgets are enabled/disabled correctly on startup
         if self.write_to_usb.isChecked():
-            self.on_usb_write_toggled(
-                Qt.CheckState.Checked.value if HAS_PYQT6 else 2
-            )
+            self.on_usb_write_toggled(Qt.CheckState.Checked.value)
         else:
             self.usb_device_combo.setEnabled(False)
             self.refresh_usb_btn.setEnabled(False)
@@ -351,11 +305,6 @@ class ISOBuilderGUI(QMainWindow):
             self.settings['excluded_packages'] = getattr(
                 self, 'excluded_packages', []
             )
-            self.settings['root_password'] = self.root_password_input.text()
-            if self.user_source_combo.currentData():
-                self.settings['template_user'] = (
-                    self.user_source_combo.currentData()
-                )
 
             with open(self.CONFIG_FILE, 'w') as f:
                 json.dump(self.settings, f, indent=2)
@@ -458,52 +407,9 @@ class ISOBuilderGUI(QMainWindow):
             )
             self.usb_device_combo.addItem(display_text, device['path'])
 
-    def populate_user_list(self):
-        """Populate the user combo box with system users"""
-        self.user_source_combo.clear()
-        try:
-            # Get all users with home directories
-            result = run_command(['getent', 'passwd'], check=False)
-            if result.returncode == 0:
-                users = []
-                for line in result.stdout.strip().split('\n'):
-                    if not line:
-                        continue
-                    parts = line.split(':')
-                    if len(parts) >= 6:
-                        username = parts[0]
-                        uid = int(parts[2])
-                        home_dir = parts[5]
-                        # Only include regular users (UID >= 1000)
-                        # with home dirs
-                        if (uid >= 1000 and home_dir and
-                                os.path.exists(home_dir) and
-                                os.path.isdir(home_dir)):
-                            users.append(username)
-
-                users.sort()
-                for user in users:
-                    self.user_source_combo.addItem(user, user)
-
-                # Restore previously selected user if exists
-                saved_user = self.settings.get('template_user', '')
-                if saved_user:
-                    index = self.user_source_combo.findData(saved_user)
-                    if index >= 0:
-                        self.user_source_combo.setCurrentIndex(index)
-            else:
-                self.user_source_combo.addItem('No users found', None)
-        except Exception as e:
-            self.user_source_combo.addItem('Error loading users', None)
-            self.log_output.append(
-                f"[WARN] Failed to load users: {str(e)}\n"
-            )
-
     def on_usb_write_toggled(self, state):
         """Enable/disable USB device selection based on checkbox"""
-        enabled = (
-            state == Qt.CheckState.Checked.value if HAS_PYQT6 else state == 2
-        )
+        enabled = (state == Qt.CheckState.Checked.value)
         self.usb_device_combo.setEnabled(enabled)
         if hasattr(self, 'refresh_usb_btn'):
             self.refresh_usb_btn.setEnabled(enabled)
@@ -538,6 +444,28 @@ class ISOBuilderGUI(QMainWindow):
             self.excluded_packages = dialog.get_excluded_packages()
             self.settings['excluded_packages'] = self.excluded_packages
             self.save_settings()
+
+    def show_optimization_dialog(self):
+        """Show the build optimization settings dialog"""
+        dialog = BuildOptimizationDialog(self, self.settings)
+        accepted, _ = get_qt_dialog_code()
+        result = dialog.exec()
+
+        if result == accepted:
+            # Settings are saved within the dialog
+            # Reload settings to ensure we have the latest values
+            self.load_settings()
+
+    def show_user_config_dialog(self):
+        """Show the user configuration dialog"""
+        dialog = UserConfigurationDialog(self, self.settings)
+        accepted, _ = get_qt_dialog_code()
+        result = dialog.exec()
+
+        if result == accepted:
+            # Settings are saved within the dialog
+            # Reload settings to ensure we have the latest values
+            self.load_settings()
         # Note: excluded_packages and package_list are persisted in settings
 
     def get_selected_exclusions(self):
@@ -568,7 +496,6 @@ class ISOBuilderGUI(QMainWindow):
         most_recent = iso_files[0]
 
         # Check if ISO is recent (within last 24 hours)
-        import time
         current_time = time.time()
         iso_age = current_time - most_recent.stat().st_mtime
         hours_old = iso_age / 3600
@@ -583,13 +510,17 @@ class ISOBuilderGUI(QMainWindow):
         if not self.check_root():
             return
 
-        date_str = subprocess.check_output(
-            ['date', '+%Y%m'], text=True
-        ).strip()
+        date_str = (
+            subprocess.check_output(['date', '+%Y%m'], text=True).strip()
+        )
 
+        # Get user config from settings (loaded from dialog)
         user_config = {
-            'root_password': self.root_password_input.text(),
-            'template_user': self.user_source_combo.currentData()
+            'username': self.settings.get('username', 'archuser'),
+            'user_password': self.settings.get('user_password', 'arch'),
+            'root_password': self.settings.get('root_password', 'root'),
+            'user_sudo': self.settings.get('user_sudo', True),
+            'template_user': self.settings.get('template_user')
         }
 
         output_dir = self.output_dir_input.text()
@@ -600,7 +531,6 @@ class ISOBuilderGUI(QMainWindow):
         if existing_iso:
             # Prompt user
             iso_size = existing_iso.stat().st_size / (1024**3)
-            import time
             iso_age_hours = (
                 (time.time() - existing_iso.stat().st_mtime) / 3600
             )
@@ -642,6 +572,10 @@ class ISOBuilderGUI(QMainWindow):
                 self.build_finished(True, str(existing_iso))
                 return
 
+        # Get compression settings from saved settings
+        compression_type = self.settings.get('compression_type', 'zstd')
+        compression_level = self.settings.get('compression_level', None)
+
         # Proceed with normal build
         config = {
             'work_dir': self.work_dir_input.text(),
@@ -651,7 +585,9 @@ class ISOBuilderGUI(QMainWindow):
             'exclude_dirs': self.get_selected_exclusions(),
             'excluded_packages': self.excluded_packages,
             'include_custom_repos': self.include_custom_repos.isChecked(),
-            'user_config': user_config
+            'user_config': user_config,
+            'compression_type': compression_type,
+            'compression_level': compression_level
         }
 
         # Update UI
@@ -685,9 +621,6 @@ class ISOBuilderGUI(QMainWindow):
 
     def _init_log_file(self):
         """Initialize log file for this session"""
-        from datetime import datetime
-        from ..utils import safe_makedirs
-
         # Create log directory if it doesn't exist
         safe_makedirs(Paths.LOG_DIR, mode=0o755)
 

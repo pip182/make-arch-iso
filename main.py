@@ -7,9 +7,8 @@ Requires: PyQt6 (pip install PyQt6 or pacman -S python-pyqt6)
 import sys
 import os
 
-from make_arch_iso.qt_compat import (
-    QApplication, HAS_PYQT6, HAS_PYQT5
-)
+from PyQt6.QtWidgets import QApplication
+from PyQt6.QtCore import Qt
 from make_arch_iso.constants import Colors
 from make_arch_iso.gui.main_window import ISOBuilderGUI
 
@@ -24,104 +23,26 @@ def main():
         print("  sudo ./main.py")
         sys.exit(1)
 
-    if not HAS_PYQT6 and not HAS_PYQT5:
-        print("Error: PyQt6 or PyQt5 is required")
-        print("\nInstall with:")
-        print("  sudo pacman -S python-pyqt6")
-        print("  or")
-        print("  sudo pacman -S python-pyqt5")
-        print("  or")
-        print("  pip install PyQt6")
-        sys.exit(1)
-
-    # Set Qt to use dark theme if available (Qt 6.5+)
-    if HAS_PYQT6:
-        from PyQt6.QtCore import Qt
-        try:
-            QApplication.setHighDpiScaleFactorRoundingPolicy(
-                Qt.HighDpiScaleFactorRoundingPolicy.PassThrough
-            )
-        except AttributeError:
-            pass
+    # Set Qt high DPI settings
+    try:
+        QApplication.setHighDpiScaleFactorRoundingPolicy(
+            Qt.HighDpiScaleFactorRoundingPolicy.PassThrough
+        )
+    except AttributeError:
+        pass
 
     app = QApplication(sys.argv)
-
-    # Enable dark mode via environment or Qt attribute
-    if HAS_PYQT6:
-        try:
-            # Try to use native dark mode (Qt 6.5+)
-            app.setStyleSheet("")
-            os.environ['QT_QPA_PLATFORM'] = os.environ.get(
-                'QT_QPA_PLATFORM', 'xcb'
-            )
-        except (AttributeError, KeyError, OSError):
-            pass
 
     # Apply dark theme
     app.setStyle('Fusion')
 
-    dark_palette = app.palette() if HAS_PYQT6 else app.palette()
-    if HAS_PYQT6:
-        from PyQt6.QtGui import QPalette, QColor
-        from PyQt6.QtCore import Qt
-    else:
-        from PyQt5.QtGui import QPalette, QColor
-        from PyQt5.QtCore import Qt
-
-    # Modern dark theme colors - clean and professional
-    dark_palette.setColor(QPalette.ColorRole.Window, QColor(30, 30, 30))
-    dark_palette.setColor(
-        QPalette.ColorRole.WindowText, QColor(240, 240, 240)
-    )
-    dark_palette.setColor(QPalette.ColorRole.Base, QColor(25, 25, 25))
-    dark_palette.setColor(
-        QPalette.ColorRole.AlternateBase, QColor(35, 35, 35)
-    )
-    dark_palette.setColor(QPalette.ColorRole.ToolTipBase, QColor(20, 20, 20))
-    dark_palette.setColor(
-        QPalette.ColorRole.ToolTipText, QColor(240, 240, 240)
-    )
-    dark_palette.setColor(QPalette.ColorRole.Text, QColor(240, 240, 240))
-    dark_palette.setColor(QPalette.ColorRole.Button, QColor(45, 45, 45))
-    dark_palette.setColor(
-        QPalette.ColorRole.ButtonText, QColor(240, 240, 240)
-    )
-    dark_palette.setColor(
-        QPalette.ColorRole.BrightText, QColor(255, 100, 100)
-    )
-    dark_palette.setColor(QPalette.ColorRole.Link, QColor(100, 150, 255))
-    dark_palette.setColor(QPalette.ColorRole.Highlight, QColor(70, 130, 200))
-    dark_palette.setColor(
-        QPalette.ColorRole.HighlightedText, QColor(255, 255, 255)
-    )
-
-    # Disabled colors for better visual feedback
-    dark_palette.setColor(
-        QPalette.ColorGroup.Disabled, QPalette.ColorRole.WindowText,
-        QColor(120, 120, 120)
-    )
-    dark_palette.setColor(
-        QPalette.ColorGroup.Disabled, QPalette.ColorRole.Text,
-        QColor(120, 120, 120)
-    )
-    dark_palette.setColor(
-        QPalette.ColorGroup.Disabled, QPalette.ColorRole.ButtonText,
-        QColor(120, 120, 120)
-    )
-    dark_palette.setColor(
-        QPalette.ColorGroup.Disabled, QPalette.ColorRole.Base,
-        QColor(30, 30, 30)
-    )
-    dark_palette.setColor(
-        QPalette.ColorGroup.Disabled, QPalette.ColorRole.Button,
-        QColor(30, 30, 30)
-    )
-
-    app.setPalette(dark_palette)
-
     app.setStyleSheet(f"""
         QMainWindow {{
             background-color: {Colors.BG_PRIMARY};
+        }}
+        QDialog {{
+            background-color: {Colors.BG_PRIMARY};
+            color: {Colors.TEXT_PRIMARY};
         }}
         QToolTip {{
             color: {Colors.TOOLTIP_TEXT};
@@ -387,11 +308,17 @@ def main():
             color: {Colors.TEXT_DISABLED};
             opacity: 0.6;
         }}
+        QDialogButtonBox {{
+            background-color: {Colors.BG_PRIMARY};
+        }}
+        QDialogButtonBox QPushButton {{
+            min-width: 80px;
+        }}
     """)
 
     window = ISOBuilderGUI()
     window.show()
-    sys.exit(app.exec() if HAS_PYQT6 else app.exec_())
+    sys.exit(app.exec())
 
 
 if __name__ == '__main__':

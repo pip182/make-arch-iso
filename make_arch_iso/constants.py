@@ -6,88 +6,90 @@ class Colors:
     """Color constants for UI styling - comprehensive dark theme palette"""
 
     # Status colors
-    SUCCESS = "#51cf66"
-    ERROR = "#ff6b6b"
-    INFO = "#74c0fc"
-    WARNING = "#ff6b6b"
+    SUCCESS = "#51c460"                      # Status: success (green)
+    ERROR = "#ff6b6b"                        # Status: error (red)
+    INFO = "#74b6ef"                         # Status: info (blue)
+    WARNING = "#ff6b6b"                      # Status: warning (red, same as error)
 
-    # Background colors (dark theme)
-    BG_PRIMARY = "#1e1e1e"              # Main window background
-    BG_SECONDARY = "#252525"            # Input fields, list widgets
-    BG_TERTIARY = "#2a2a2a"             # Hover states, tooltips
-    BG_QUATERNARY = "#292929"           # Alternate backgrounds
-    BG_DARKEST = "#1a1a1a"              # Text edit backgrounds
-    BG_BUTTON = "#3a3a3a"               # Default button background
-    BG_BUTTON_HOVER = "#454545"         # Button hover state
-    BG_BUTTON_PRESSED = "#2d2d2d"       # Button pressed state
-    BG_DISABLED = "#1e1e1e"             # Disabled widget background
+    # Background colors (dark theme) - blue-based grays, high contrast
+    BG_PRIMARY = "#1c181e"                     # Main window background
+    BG_SECONDARY = "#1f1c24"                   # Input fields, list widgets
+    BG_TERTIARY = "#212027"                    # Hover states, tooltips, group boxes
+    BG_QUATERNARY = "#25222e"                  # Alternate backgrounds
+    BG_DARKEST = "#15141a"                     # Text edit backgrounds
+    BG_BUTTON = "#282733"                      # Default button background
+    BG_BUTTON_HOVER = "#2e2738"                # Button hover state background
+    BG_BUTTON_PRESSED = "#1e2028"              # Button pressed state background
+    BG_DISABLED = "#1c181e"                    # Disabled widget background
 
-    # Text colors
-    TEXT_PRIMARY = "#f0f0f0"            # Primary text color
-    TEXT_SECONDARY = "#e0e0e0"          # Secondary text (group box titles)
-    TEXT_DISABLED = "#707070"           # Disabled text
-    TEXT_SELECTION = "#ffffff"          # Selected text color
+    # Text colors - higher contrast
+    TEXT_PRIMARY = "#ECEFF1"                 # Primary text color (brighter)
+    TEXT_SECONDARY = "#CFD4DC"               # Secondary text (group box titles)
+    TEXT_DISABLED = "#78889C"                # Disabled text color
+    TEXT_SELECTION = "#ffffff"               # Selected text color
 
-    # Border colors
-    BORDER_DEFAULT = "#404040"          # Default border
-    BORDER_HOVER = "#505050"            # Hover border
-    BORDER_ACTIVE = "#606060"           # Active/hover border (lighter)
-    BORDER_FOCUS = "#4682b4"            # Focus border (blue)
-    BORDER_DISABLED = "#353535"         # Disabled border (dashed)
+    # Border colors - increased contrast
+    BORDER_DEFAULT = "#455564"               # Default border (blue-gray)
+    BORDER_HOVER = "#5467aA"                 # Hover border (blue)
+    BORDER_ACTIVE = "#60758B"                # Active/hover border (lighter)
+    BORDER_FOCUS = "#64a2e9"                 # Focus border (blue highlight)
+    BORDER_DISABLED = "#37444F"              # Disabled border (dashed look)
 
     # Button colors
-    BUTTON_SUCCESS = "#4a7c59"          # Success button (green)
-    BUTTON_SUCCESS_HOVER = "#5a9c69"
-    BUTTON_SUCCESS_PRESSED = "#295137"
-    BUTTON_SUCCESS_BORDER = "#5a9c69"
-    BUTTON_SUCCESS_BORDER_HOVER = "#6aac79"
+    # Button colors for "Success" (e.g., confirm, OK actions) - green-based
+    BUTTON_SUCCESS = "#4a7554"               # Success button background
+    BUTTON_SUCCESS_HOVER = "#5a9463"         # Success button background (hover state)
+    BUTTON_SUCCESS_PRESSED = "#294c34"       # Success button background (pressed state)
+    BUTTON_SUCCESS_BORDER = "#5a9463"        # Success button border (default)
+    BUTTON_SUCCESS_BORDER_HOVER = "#6aa372"  # Success button border (hover state)
 
-    BUTTON_ERROR = "#7c4a4a"            # Error button (red)
-    BUTTON_ERROR_HOVER = "#9c5a5a"
-    BUTTON_ERROR_PRESSED = "#6c3a3a"
-    BUTTON_ERROR_BORDER = "#9c5a5a"
-    BUTTON_ERROR_BORDER_HOVER = "#ac6a6a"
+    BUTTON_ERROR = "#7c4a4a"                 # Error button background (red)
+    BUTTON_ERROR_HOVER = "#9c5a5a"           # Error button background (hover state)
+    BUTTON_ERROR_PRESSED = "#6c3a3a"         # Error button background (pressed state)
+    BUTTON_ERROR_BORDER = "#9c5a5a"          # Error button border (default)
+    BUTTON_ERROR_BORDER_HOVER = "#ac6a6a"    # Error button border (hover state)
 
-    # Selection colors
-    SELECTION_BG = "#4682b4"            # Selection background (blue)
-    SELECTION_TEXT = "#ffffff"          # Selection text
+    # Selection colors - brighter blue
+    SELECTION_BG = "#64a2e9"                 # Background for selected items (blue)
+    SELECTION_TEXT = "#ffffff"               # Selection text (white)
 
     # List/Item colors
-    LIST_ITEM_BORDER = "#353535"        # List item separator
-    LIST_ITEM_HOVER = "#353535"         # List item hover
+    LIST_ITEM_BORDER = "#353235"             # List item separator border
+    LIST_ITEM_HOVER = "#353235"              # List item hover background/border
 
-    # Checkbox colors
-    CHECKBOX_BORDER = "#505050"         # Checkbox border
-    CHECKBOX_BORDER_HOVER = "#606060"   # Checkbox hover border
-    CHECKBOX_CHECKED = "#4682b4"        # Checkbox checked background
+    # Checkbox colors - blue-based
+    CHECKBOX_BORDER = "#54677A"              # Checkbox border
+    CHECKBOX_BORDER_HOVER = "#60758B"        # Checkbox hover border
+    CHECKBOX_CHECKED = "#64a2e9"             # Checkbox checked indicator (blue)
 
-    # Progress bar colors
-    PROGRESS_BG = "#252525"             # Progress bar background
-    PROGRESS_CHUNK = "#4682b4"          # Progress bar fill
+    # Progress bar colors - blue-based
+    PROGRESS_BG = "#252833"                  # Progress bar background
+    PROGRESS_CHUNK = "#64a2e9"               # Progress bar filled portion (chunk)
 
     # Scrollbar colors
-    SCROLLBAR_BG = "#252525"            # Scrollbar background
-    SCROLLBAR_HANDLE = "#404040"        # Scrollbar handle
-    SCROLLBAR_HANDLE_HOVER = "#505050"  # Scrollbar handle hover
+    SCROLLBAR_BG = "#252833"                 # Scrollbar background
+    SCROLLBAR_HANDLE = "#455564"             # Scrollbar handle
+    SCROLLBAR_HANDLE_HOVER = "#54677A"       # Scrollbar handle (hover state)
 
     # Combo box colors
-    COMBO_ARROW = "#a0a0a0"             # Combo box dropdown arrow
+    COMBO_ARROW = "#a0a0a0"                  # Combo box dropdown arrow color
 
-    # Tooltip colors
-    TOOLTIP_BG = "#2a2a2a"              # Tooltip background
-    TOOLTIP_TEXT = "#ffffff"            # Tooltip text
-    TOOLTIP_BORDER = "#555555"          # Tooltip border
+    # Tooltip colors - blue-based
+    TOOLTIP_BG = "#2a3039"                   # Tooltip background
+    TOOLTIP_TEXT = "#ECEFF1"                 # Tooltip text color
+    TOOLTIP_BORDER = "#54677A"               # Tooltip border color
 
 
 class LayoutSpacing:
     """Spacing constants for layouts"""
-    MAIN_SPACING = 8
-    MAIN_MARGINS = 12
-    GROUP_SPACING = 6
-    GROUP_MARGINS = (8, 12, 8, 8)
-    FIELD_SPACING = 6
-    MIN_INPUT_HEIGHT = 24
-    MIN_PROGRESS_HEIGHT = 28
+    MAIN_SPACING = 16  # Increased from 8
+    MAIN_MARGINS = 16  # Increased from 12
+    GROUP_SPACING = 12  # Increased from 6
+    GROUP_MARGINS = (12, 16, 12, 12)  # Increased from (8, 12, 8, 8)
+    FIELD_SPACING = 10  # Increased from 6
+    MIN_INPUT_HEIGHT = 28  # Increased from 24
+    MIN_PROGRESS_HEIGHT = 32  # Increased from 28
+    SECTION_SPACING = 20  # Spacing between major sections
 
 
 class Paths:

@@ -1,10 +1,16 @@
 """GUI Dialog classes"""
-from ..qt_compat import (
+import os
+import json
+from datetime import datetime
+from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QPushButton, QLabel,
     QListWidget, QListWidgetItem, QMessageBox,
-    QLineEdit, QColor, Qt
+    QLineEdit, QComboBox, QCheckBox, QInputDialog
 )
-from ..constants import Colors
+from PyQt6.QtGui import QColor
+from PyQt6.QtCore import Qt
+from ..constants import Colors, LayoutSpacing
+from ..utils import run_command
 from .threads import PackageLoaderThread
 
 
@@ -87,11 +93,6 @@ class ExclusionsDialog(QDialog):
 
     def add_custom_exclusion(self):
         """Add a custom directory exclusion pattern"""
-        try:
-            from PyQt6.QtWidgets import QInputDialog
-        except ImportError:
-            from PyQt5.QtWidgets import QInputDialog
-
         text, ok = QInputDialog.getText(
             self,
             'Add Custom Exclusion',
@@ -275,8 +276,6 @@ class PackageSelectionDialog(QDialog):
 
     def _load_from_cache_or_start(self):
         """Load package list from cache or start loading if old/missing"""
-        from datetime import datetime
-
         # Check if we have cached package list
         cached_list = self.settings.get('package_list', [])
         cached_date_str = self.settings.get('package_list_date', '')
@@ -455,7 +454,6 @@ class PackageSelectionDialog(QDialog):
 
     def _save_to_cache(self, all_packages):
         """Save package list to cache in settings"""
-        from datetime import datetime
         if self.parent_window:
             self.parent_window.settings['package_list'] = all_packages
             self.parent_window.settings['package_list_date'] = (
@@ -594,3 +592,336 @@ class PackageSelectionDialog(QDialog):
             if item.checkState() == Qt.CheckState.Checked:
                 excluded.append(item.text())
         return excluded
+
+
+class BuildOptimizationDialog(QDialog):
+    """Dialog for build optimization settings"""
+
+    def __init__(self, parent, settings):
+        super().__init__(parent)
+        self.parent_window = parent
+        self.settings = settings
+        self.setWindowTitle('Build Optimization Settings')
+        self.setMinimumSize(550, 400)
+
+        layout = QVBoxLayout(self)
+        layout.setSpacing(LayoutSpacing.GROUP_SPACING)
+        layout.setContentsMargins(*LayoutSpacing.GROUP_MARGINS)
+
+        # Info label
+        info_label = QLabel(
+            'Compression settings significantly affect build time. Zstd is '
+            'recommended for faster builds with good compression. XZ provides '
+            'best compression but is slower.'
+        )
+        info_label.setWordWrap(True)
+        layout.addWidget(info_label)
+
+        # Compression type
+        compression_layout = QHBoxLayout()
+        compression_layout.setSpacing(LayoutSpacing.FIELD_SPACING)
+        compression_label = QLabel('Compression Type:')
+        compression_label.setMinimumWidth(140)
+        compression_layout.addWidget(compression_label)
+        self.compression_combo = QComboBox()
+        self.compression_combo.addItems([
+            'zstd (Fast, Recommended)',
+            'gzip (Fast)',
+            'xz (Slow, Best Compression)'
+        ])
+        compression_type_setting = self.settings.get('compression_type', 'zstd')
+        if compression_type_setting == 'zstd':
+            self.compression_combo.setCurrentIndex(0)
+        elif compression_type_setting == 'gzip':
+            self.compression_combo.setCurrentIndex(1)
+        elif compression_type_setting == 'xz':
+            self.compression_combo.setCurrentIndex(2)
+        self.compression_combo.currentIndexChanged.connect(self.save_settings)
+        compression_layout.addWidget(self.compression_combo)
+        compression_layout.addStretch()
+        layout.addLayout(compression_layout)
+
+        # Compression level (optional)
+        level_info_label = QLabel(
+            'Compression Level (optional): Lower = faster build, Higher = smaller ISO. '
+            'Leave blank for defaults (zstd: 6, gzip: 6, xz: 6)'
+        )
+        level_info_label.setWordWrap(True)
+        layout.addWidget(level_info_label)
+
+        level_layout = QHBoxLayout()
+        level_layout.setSpacing(LayoutSpacing.FIELD_SPACING)
+        level_label = QLabel('Level (1-22 for zstd, 1-9 for gzip/xz):')
+        level_label.setMinimumWidth(140)
+        level_layout.addWidget(level_label)
+        self.compression_level_input = QLineEdit()
+        self.compression_level_input.setMinimumWidth(100)
+        self.compression_level_input.setMinimumHeight(LayoutSpacing.MIN_INPUT_HEIGHT)
+        compression_level = self.settings.get('compression_level', None)
+        if compression_level:
+            self.compression_level_input.setText(str(compression_level))
+        self.compression_level_input.textChanged.connect(self.save_settings)
+        level_layout.addWidget(self.compression_level_input)
+        level_layout.addStretch()
+        layout.addLayout(level_layout)
+
+        layout.addStretch()
+
+        # Dialog buttons
+        dialog_btn_layout = QHBoxLayout()
+        dialog_btn_layout.addStretch()
+
+        ok_btn = QPushButton('OK')
+        ok_btn.clicked.connect(self.accept)
+        dialog_btn_layout.addWidget(ok_btn)
+
+        cancel_btn = QPushButton('Cancel')
+        cancel_btn.clicked.connect(self.reject)
+        dialog_btn_layout.addWidget(cancel_btn)
+
+        layout.addLayout(dialog_btn_layout)
+
+    def save_settings(self):
+        """Save compression settings"""
+        try:
+            compression_index = self.compression_combo.currentIndex()
+            if compression_index == 0:
+                self.settings['compression_type'] = 'zstd'
+            elif compression_index == 1:
+                self.settings['compression_type'] = 'gzip'
+            elif compression_index == 2:
+                self.settings['compression_type'] = 'xz'
+
+            compression_level_text = self.compression_level_input.text().strip()
+            if compression_level_text:
+                try:
+                    level = int(compression_level_text)
+                    self.settings['compression_level'] = level
+                except ValueError:
+                    self.settings['compression_level'] = None
+            else:
+                self.settings['compression_level'] = None
+
+            # Save to config file
+            config_dir = os.path.dirname(self.parent_window.CONFIG_FILE)
+            os.makedirs(config_dir, exist_ok=True)
+            with open(self.parent_window.CONFIG_FILE, 'w') as f:
+                json.dump(self.settings, f, indent=2)
+        except Exception:
+            pass  # Fail silently if we can't save settings
+
+
+class UserConfigurationDialog(QDialog):
+    """Dialog for user account configuration"""
+
+    def __init__(self, parent, settings):
+        super().__init__(parent)
+        self.parent_window = parent
+        self.settings = settings
+        self.setWindowTitle('User Configuration')
+        self.setMinimumSize(550, 400)
+
+        layout = QVBoxLayout(self)
+        layout.setSpacing(LayoutSpacing.GROUP_SPACING * 2)  # Increased spacing
+        layout.setContentsMargins(*LayoutSpacing.GROUP_MARGINS)
+
+        # Info label
+        info_label = QLabel(
+            'Configure the user account for the live ISO and installed system. '
+            'This user will be created with sudo access and will be used for '
+            'automatic login. You can optionally use a system user\'s home '
+            'directory as a template.'
+        )
+        info_label.setWordWrap(True)
+        layout.addWidget(info_label)
+
+        # Add spacing after info label
+        layout.addSpacing(LayoutSpacing.FIELD_SPACING)
+
+        # Create two-column layout
+        columns_layout = QHBoxLayout()
+        columns_layout.setSpacing(LayoutSpacing.FIELD_SPACING * 2)
+
+        # Left column
+        left_column = QVBoxLayout()
+        left_column.setSpacing(LayoutSpacing.FIELD_SPACING * 2)  # Increased vertical spacing
+
+        # Username field
+        username_layout = QHBoxLayout()
+        username_layout.setSpacing(LayoutSpacing.FIELD_SPACING)
+        username_label = QLabel('Username:')
+        username_label.setMinimumWidth(120)
+        username_layout.addWidget(username_label)
+        self.username_input = QLineEdit()
+        self.username_input.setMinimumWidth(200)
+        self.username_input.setMinimumHeight(LayoutSpacing.MIN_INPUT_HEIGHT)
+        self.username_input.setText(
+            self.settings.get('username', 'archuser')
+        )
+        self.username_input.textChanged.connect(self.save_settings)
+        username_layout.addWidget(self.username_input)
+        username_layout.addStretch()
+        left_column.addLayout(username_layout)
+
+        # User password field
+        user_password_layout = QHBoxLayout()
+        user_password_layout.setSpacing(LayoutSpacing.FIELD_SPACING)
+        user_password_label = QLabel('User Password:')
+        user_password_label.setMinimumWidth(120)
+        user_password_layout.addWidget(user_password_label)
+        self.user_password_input = QLineEdit()
+        self.user_password_input.setEchoMode(QLineEdit.EchoMode.Password)
+        self.user_password_input.setMinimumHeight(
+            LayoutSpacing.MIN_INPUT_HEIGHT
+        )
+        self.user_password_input.setMinimumWidth(200)
+        self.user_password_input.setText(
+            self.settings.get('user_password', 'arch')
+        )
+        self.user_password_input.textChanged.connect(self.save_settings)
+        user_password_layout.addWidget(self.user_password_input)
+        user_password_layout.addStretch()
+        left_column.addLayout(user_password_layout)
+
+        # Root password field
+        root_password_layout = QHBoxLayout()
+        root_password_layout.setSpacing(LayoutSpacing.FIELD_SPACING)
+        root_password_label = QLabel('Root Password:')
+        root_password_label.setMinimumWidth(120)
+        root_password_layout.addWidget(root_password_label)
+        self.root_password_input = QLineEdit()
+        self.root_password_input.setEchoMode(QLineEdit.EchoMode.Password)
+        self.root_password_input.setMinimumHeight(
+            LayoutSpacing.MIN_INPUT_HEIGHT
+        )
+        self.root_password_input.setMinimumWidth(200)
+        self.root_password_input.setText(
+            self.settings.get('root_password', 'root')
+        )
+        self.root_password_input.textChanged.connect(self.save_settings)
+        root_password_layout.addWidget(self.root_password_input)
+        root_password_layout.addStretch()
+        left_column.addLayout(root_password_layout)
+
+        left_column.addStretch()
+        columns_layout.addLayout(left_column)
+
+        # Right column
+        right_column = QVBoxLayout()
+        right_column.setSpacing(LayoutSpacing.FIELD_SPACING)
+
+        # Sudo access checkbox
+        self.sudo_checkbox = QCheckBox('Grant sudo access to user')
+        self.sudo_checkbox.setChecked(
+            self.settings.get('user_sudo', True)
+        )
+        self.sudo_checkbox.stateChanged.connect(self.save_settings)
+        right_column.addWidget(self.sudo_checkbox)
+
+        # User template selection
+        user_template_layout = QVBoxLayout()
+        user_template_layout.setSpacing(LayoutSpacing.FIELD_SPACING)
+        user_template_layout.addWidget(QLabel('User Template (optional):'))
+
+        template_input_layout = QHBoxLayout()
+        template_input_layout.setSpacing(LayoutSpacing.FIELD_SPACING)
+        # User selection combo
+        self.user_source_combo = QComboBox()
+        self.user_source_combo.setMinimumWidth(200)
+        self.populate_user_list()
+        self.user_source_combo.currentIndexChanged.connect(self.save_settings)
+        template_input_layout.addWidget(self.user_source_combo)
+
+        # Refresh users button
+        refresh_users_btn = QPushButton('Refresh')
+        refresh_users_btn.clicked.connect(self.populate_user_list)
+        template_input_layout.addWidget(refresh_users_btn)
+        template_input_layout.addStretch()
+
+        user_template_layout.addLayout(template_input_layout)
+        right_column.addLayout(user_template_layout)
+
+        right_column.addStretch()
+        columns_layout.addLayout(right_column)
+
+        # Set equal stretch for both columns
+        columns_layout.setStretchFactor(left_column, 1)
+        columns_layout.setStretchFactor(right_column, 1)
+
+        layout.addLayout(columns_layout)
+        layout.addStretch()
+
+        # Add spacing before dialog buttons
+        layout.addSpacing(LayoutSpacing.FIELD_SPACING * 2)
+
+        # Dialog buttons
+        dialog_btn_layout = QHBoxLayout()
+        dialog_btn_layout.addStretch()
+
+        ok_btn = QPushButton('OK')
+        ok_btn.clicked.connect(self.accept)
+        dialog_btn_layout.addWidget(ok_btn)
+
+        cancel_btn = QPushButton('Cancel')
+        cancel_btn.clicked.connect(self.reject)
+        dialog_btn_layout.addWidget(cancel_btn)
+
+        layout.addLayout(dialog_btn_layout)
+
+    def populate_user_list(self):
+        """Populate the user combo box with system users"""
+        self.user_source_combo.clear()
+        try:
+            # Get all users with home directories
+            result = run_command(['getent', 'passwd'], check=False)
+            if result.returncode == 0:
+                users = []
+                for line in result.stdout.strip().split('\n'):
+                    if not line:
+                        continue
+                    parts = line.split(':')
+                    if len(parts) >= 6:
+                        username = parts[0]
+                        home_dir = parts[5]
+                        # Only show users with valid home directories
+                        if home_dir and os.path.exists(home_dir) and \
+                                home_dir != '/' and \
+                                username not in ['nobody', 'nfsnobody']:
+                            users.append(username)
+
+                # Sort and add to combo
+                for username in sorted(users):
+                    self.user_source_combo.addItem(username, username)
+
+                # Set current selection if saved
+                saved_user = self.settings.get('template_user')
+                if saved_user:
+                    index = self.user_source_combo.findData(saved_user)
+                    if index >= 0:
+                        self.user_source_combo.setCurrentIndex(index)
+            else:
+                self.user_source_combo.addItem('No users found', None)
+        except Exception as e:
+            self.user_source_combo.addItem('Error loading users', None)
+
+    def save_settings(self):
+        """Save user configuration settings"""
+        try:
+            self.settings['username'] = self.username_input.text()
+            self.settings['user_password'] = self.user_password_input.text()
+            self.settings['root_password'] = self.root_password_input.text()
+            self.settings['user_sudo'] = self.sudo_checkbox.isChecked()
+            if self.user_source_combo.currentData():
+                self.settings['template_user'] = (
+                    self.user_source_combo.currentData()
+                )
+            else:
+                self.settings.pop('template_user', None)
+
+            # Save to config file
+            config_dir = os.path.dirname(self.parent_window.CONFIG_FILE)
+            os.makedirs(config_dir, exist_ok=True)
+            with open(self.parent_window.CONFIG_FILE, 'w') as f:
+                json.dump(self.settings, f, indent=2)
+        except Exception:
+            pass  # Fail silently if we can't save settings

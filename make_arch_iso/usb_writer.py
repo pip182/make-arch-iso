@@ -2,7 +2,7 @@
 import os
 import subprocess
 
-from .qt_compat import QThread, pyqtSignal
+from PyQt6.QtCore import QThread, pyqtSignal
 from .utils import run_command
 
 

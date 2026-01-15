@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=Install Arch Linux
+Comment=Run the custom Arch installer
+Exec=/root/Desktop/install.sh
+Terminal=true
+Icon=utilities-terminal
+Categories=System;

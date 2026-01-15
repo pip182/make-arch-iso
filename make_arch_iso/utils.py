@@ -2,7 +2,12 @@
 import os
 import subprocess
 from typing import List
-from .qt_compat import QIcon, QPixmap, QPainter, QColor, Qt, HAS_PYQT6
+from PyQt6.QtWidgets import QDialog
+from PyQt6.QtGui import QIcon, QPixmap, QPainter, QColor, QPolygon
+from PyQt6.QtCore import Qt, QPoint
+
+QDIALOG_ACCEPTED = QDialog.DialogCode.Accepted
+QDIALOG_REJECTED = QDialog.DialogCode.Rejected
 
 
 def run_command(
@@ -85,12 +90,7 @@ def safe_makedirs(path: str, mode: int = 0o755) -> None:
 
 def get_qt_dialog_code():
     """Get the correct QDialog code constant for PyQt version"""
-    try:
-        from PyQt6.QtWidgets import QDialog
-        return QDialog.DialogCode.Accepted, QDialog.DialogCode.Rejected
-    except ImportError:
-        from PyQt5.QtWidgets import QDialog
-        return QDialog.Accepted, QDialog.Rejected
+    return QDIALOG_ACCEPTED, QDIALOG_REJECTED
 
 
 def create_app_icon():
@@ -102,10 +102,7 @@ def create_app_icon():
     pixmap.fill(QColor(0, 0, 0, 0))  # Transparent background
 
     painter = QPainter(pixmap)
-    if HAS_PYQT6:
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-    else:
-        painter.setRenderHint(QPainter.Antialiasing)
+    painter.setRenderHint(QPainter.RenderHint.Antialiasing)
 
     # Draw a disc/circle (silver/metallic color for ISO disc)
     center = size // 2
@@ -141,12 +138,6 @@ def create_app_icon():
     painter.setBrush(arch_blue)
 
     # Use QPoint and QPolygon for PyQt compatibility
-    if HAS_PYQT6:
-        from PyQt6.QtGui import QPolygon
-        from PyQt6.QtCore import QPoint
-    else:
-        from PyQt5.QtGui import QPolygon, QPoint
-
     polygon = QPolygon()
     for point in triangle_points:
         polygon.append(QPoint(point[0], point[1]))
