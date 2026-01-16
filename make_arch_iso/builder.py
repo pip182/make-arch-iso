@@ -40,6 +40,7 @@ class ISOBuilderThread(QThread):
         '.config/google-chrome/*/Cache',
         '.config/google-chrome/*/cache',
         '.config/google-chrome/*/OptGuideOnDeviceModel',
+        '.config/google-chrome/OptGuideOnDeviceModel',
         '.config/google-chrome/*/optimization_guide_model_store',
         '.config/google-chrome/*/component_crx_cache',
         '.config/google-chrome/*/WasmTtsEngine',
@@ -63,6 +64,8 @@ class ISOBuilderThread(QThread):
         '.config/telegram-desktop',
         '.config/discord',
         '.discord',
+        '.local/share/keyrings',
+        '.local/share/gnome-keyring',
         '.config/Signal',
         '.config/slack',
         '.config/Element',
@@ -111,7 +114,11 @@ class ISOBuilderThread(QThread):
         '.nuget',
         # Steam and games
         '.steam',
+        '.steam/*',
         '.local/share/Steam',
+        '.local/share/Steam/*',
+        '.steam/root',
+        '.steam/steam',
         '.local/share/lutris',
         '.wine',
         # IDE/Editor files and application data (can be very large)
@@ -184,8 +191,17 @@ class ISOBuilderThread(QThread):
     ]
     # Directories to include when copying user template (focus on configs)
     HOME_COPY_INCLUDES = [
-        '.config',  # GTK, Qt, and other app configs
-        '.local/share',  # Application data (excluding trash)
+        '.config',  # Application configs (UI + app settings)
+        '.config/autostart',
+        '.config/dconf',
+        '.config/gtk-3.0',
+        '.config/gtk-4.0',
+        '.config/gnome-shell',
+        '.local/share/applications',  # User .desktop entries
+        '.local/share/icons',
+        '.local/share/themes',
+        '.themes',
+        '.icons',
         '.gtkrc*',
         '.Xresources',
         '.xprofile',
@@ -198,7 +214,6 @@ class ISOBuilderThread(QThread):
         '.gitconfig',
         '.ssh',
         '.gnupg',
-        'Dev/*',
     ]
     # Directories to exclude when copying user template (temp/cache files)
     HOME_COPY_EXCLUDES = [
@@ -215,8 +230,11 @@ class ISOBuilderThread(QThread):
         '.mozilla/firefox/*/cache',
         '.config/google-chrome/*/Cache',
         '.config/google-chrome/*/cache',
+        '.local/share/keyrings',
+        '.local/share/gnome-keyring',
         # Google Chrome large data directories (exclude large folders like OptGuideOnDeviceModel)
         '.config/google-chrome/*/OptGuideOnDeviceModel',
+        '.config/google-chrome/OptGuideOnDeviceModel',
         '.config/google-chrome/*/optimization_guide_model_store',
         '.config/google-chrome/*/component_crx_cache',
         '.config/google-chrome/*/WasmTtsEngine',
@@ -309,7 +327,6 @@ class ISOBuilderThread(QThread):
         # Flatpak/Snap application data
         '.var',
         '.local/share/flatpak',
-        '.local/share/applications',
         # Container and VM data
         '.local/share/containers',
         '.local/share/docker',
@@ -319,7 +336,11 @@ class ISOBuilderThread(QThread):
         '.local/share/runtime',
         # Steam
         '.steam',
+        '.steam/*',
+        '.steam/root',
+        '.steam/steam',
         '.local/share/Steam',
+        '.local/share/Steam/*',
         # Flatpak/Snap application data
         '.var',
         '.local/share/flatpak',
@@ -390,6 +411,16 @@ class ISOBuilderThread(QThread):
     def _make_rsync_excludes(self, patterns: List[str]) -> List[str]:
         return [f'--exclude={pattern}' for pattern in patterns]
 
+    def _make_rsync_includes(self, patterns: List[str]) -> List[str]:
+        include_args = ['--include=*/']
+        for pattern in patterns:
+            if '*' in pattern:
+                include_args.append(f'--include={pattern}')
+            else:
+                include_args.append(f'--include={pattern}')
+                include_args.append(f'--include={pattern}/***')
+        return include_args
+
     def _build_package_list(
         self,
         profile_dir: str,
@@ -426,6 +457,8 @@ class ISOBuilderThread(QThread):
             'linux-firmware',
             'base',
         }
+        if is_cachyos:
+            required_packages.add('linux-cachyos')
 
         excluded_set = set(excluded_packages)
         excluded_effective = excluded_set - required_packages
@@ -888,6 +921,8 @@ class ISOBuilderThread(QThread):
                 "gdm",
                 "networkmanager",
                 "mesa",
+                "fish",
+                "oh-my-posh",
                 # Video driver packages for various hardware
                 "xf86-video-amdgpu",  # AMD GPUs (modern, replaces xf86-video-ati)
                 # Note: xf86-video-intel is deprecated, Intel uses modesetting driver
@@ -1037,6 +1072,24 @@ class ISOBuilderThread(QThread):
                 "archiso-live\n"
             )
 
+            # Copy pacman repository configuration for live environment
+            pacman_conf_src = '/etc/pacman.conf'
+            pacman_conf_dst = os.path.join(airootfs, 'etc', 'pacman.conf')
+            if os.path.exists(pacman_conf_src):
+                os.makedirs(os.path.dirname(pacman_conf_dst), exist_ok=True)
+                subprocess.run(
+                    ['cp', pacman_conf_src, pacman_conf_dst],
+                    stderr=subprocess.DEVNULL, check=False
+                )
+            pacman_d_src = '/etc/pacman.d'
+            pacman_d_dst = os.path.join(airootfs, 'etc', 'pacman.d')
+            if os.path.isdir(pacman_d_src):
+                os.makedirs(pacman_d_dst, exist_ok=True)
+                subprocess.run(
+                    ['cp', '-r', f'{pacman_d_src}/.', pacman_d_dst],
+                    stderr=subprocess.DEVNULL, check=False
+                )
+
             # Disable PC speaker beep by blacklisting module early via kernel parameter
             # This will be added to all kernel command lines in GRUB/efiboot configs
             # We'll add it via archiso's kernel parameters in boot configs
@@ -1049,7 +1102,14 @@ class ISOBuilderThread(QThread):
             grub_dir = os.path.join(profile_dir, 'grub')
             efiboot_dir = os.path.join(profile_dir, 'efiboot')
 
+            has_nvidia_driver = any(
+                pkg in ['nvidia', 'nvidia-open'] or
+                (pkg.startswith('nvidia-') and pkg.endswith('-dkms'))
+                for pkg in packages
+            )
             kernel_params = ' modprobe.blacklist=pcspkr'
+            if has_nvidia_driver:
+                kernel_params += ' nvidia_drm.modeset=1'
 
             # Modify GRUB config files
             if os.path.exists(grub_dir):
@@ -1059,7 +1119,13 @@ class ISOBuilderThread(QThread):
                             content = f.read()
                         # Add kernel parameter to linux entries
                         # Match lines like: linux ... archisobasedir=arch ...
+                        has_bell_setting = (
+                            'set bell=0' in content or
+                            'set bell_style=none' in content
+                        )
                         modified_content = []
+                        if not has_bell_setting:
+                            modified_content.append('set bell=0')
                         for line in content.split('\n'):
                             if line.strip().startswith('linux') and 'archisobasedir' in line:
                                 # Add modprobe.blacklist=pcspkr if not already present
@@ -1152,10 +1218,12 @@ HOOKS=(base udev autodetect modconf block filesystems keyboard fsck)
                 for pkg in packages
             )
             if has_nvidia:
-                modules_list.append('nvidia')
+                modules_list.extend(
+                    ['nvidia', 'nvidia_modeset', 'nvidia_uvm', 'nvidia_drm']
+                )
                 self._emit(
-                    "[INFO] NVIDIA driver detected - adding nvidia module to "
-                    "mkinitcpio for early KMS.\n"
+                    "[INFO] NVIDIA driver detected - adding NVIDIA modules "
+                    "to mkinitcpio for early KMS.\n"
                 )
 
             # Add audio and network modules for early loading
@@ -1244,6 +1312,9 @@ HOOKS=(base udev autodetect modconf block filesystems keyboard fsck)
                         )
                     os.makedirs(dest_template, exist_ok=True)
 
+                    include_patterns = self._make_rsync_includes(
+                        self.HOME_COPY_INCLUDES
+                    )
                     exclude_patterns = self._make_rsync_excludes(
                         self.HOME_COPY_EXCLUDES
                     )
@@ -1260,8 +1331,10 @@ HOOKS=(base udev autodetect modconf block filesystems keyboard fsck)
                     rsync_cmd = (
                         ['rsync', '-a', '--info=progress2',
                          '--numeric-ids', '--no-perms', '--no-owner', '--no-group',
-                         '--inplace', '--partial', '--no-inc-recursive'] +
-                        exclude_patterns +
+                         '--inplace', '--partial', '--no-inc-recursive',
+                         '--prune-empty-dirs'] +
+                        include_patterns +
+                        exclude_patterns + ['--exclude=*'] +
                         [f'{source_home}/', f'{dest_template}/']
                     )
                     result = subprocess.run(
