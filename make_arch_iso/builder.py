@@ -849,7 +849,11 @@ class ISOBuilderThread(QThread):
             ]
 
             # Detect which NVIDIA driver is installed on current system (for intelligent defaults)
+            # Check for all possible NVIDIA driver packages including DKMS versions
             detected_nvidia_driver = None
+            detected_nvidia_related = []
+
+            # Check for standard drivers first
             result = run_command(['pacman', '-Q', 'nvidia', 'nvidia-open'], check=False)
             if result.returncode == 0:
                 # Check stdout for which one is installed
@@ -857,10 +861,54 @@ class ISOBuilderThread(QThread):
                     detected_nvidia_driver = 'nvidia'
                 elif 'nvidia-open ' in result.stdout:
                     detected_nvidia_driver = 'nvidia-open'
-            else:
+
+            # Check for DKMS NVIDIA drivers (580xx, 470xx, 390xx, 340xx)
+            if detected_nvidia_driver is None:
+                dkms_drivers = [
+                    'nvidia-580xx-dkms', 'nvidia-470xx-dkms',
+                    'nvidia-390xx-dkms', 'nvidia-340xx-dkms'
+                ]
+                for dkms_driver in dkms_drivers:
+                    result = run_command(['pacman', '-Q', dkms_driver], check=False)
+                    if result.returncode == 0:
+                        detected_nvidia_driver = dkms_driver
+                        # Extract version prefix (e.g., '580xx' from 'nvidia-580xx-dkms')
+                        version_prefix = (
+                            dkms_driver.replace('nvidia-', '').replace('-dkms', '')
+                        )
+                        # Find related packages
+                        related_check = run_command(
+                            ['pacman', '-Q'], check=False
+                        )
+                        if related_check.returncode == 0:
+                            for line in related_check.stdout.split('\n'):
+                                pkg_name = line.split()[0] if line.strip() else ''
+                                if (f'nvidia-{version_prefix}' in pkg_name or
+                                        f'lib32-nvidia-{version_prefix}' in pkg_name):
+                                    if pkg_name not in detected_nvidia_related:
+                                        detected_nvidia_related.append(pkg_name)
+                        break
+
+            # If still not found, check package list
+            if detected_nvidia_driver is None:
                 # Try checking if either is in the package list
                 if 'nvidia' in packages and 'nvidia-open' not in packages:
-                    detected_nvidia_driver = 'nvidia'
+                    # Check if it's a DKMS version
+                    for pkg in packages:
+                        if pkg.startswith('nvidia-') and pkg.endswith('-dkms'):
+                            detected_nvidia_driver = pkg
+                            version_prefix = (
+                                pkg.replace('nvidia-', '').replace('-dkms', '')
+                            )
+                            # Collect related packages from package list
+                            for related in packages:
+                                if (f'nvidia-{version_prefix}' in related or
+                                        f'lib32-nvidia-{version_prefix}' in related):
+                                    if related not in detected_nvidia_related:
+                                        detected_nvidia_related.append(related)
+                            break
+                    if detected_nvidia_driver is None:
+                        detected_nvidia_driver = 'nvidia'
                 elif 'nvidia-open' in packages:
                     detected_nvidia_driver = 'nvidia-open'
 
@@ -919,16 +967,87 @@ class ISOBuilderThread(QThread):
             # Add NVIDIA driver based on what's detected/installed
             # Prefer proprietary nvidia over nvidia-open for better compatibility
             if detected_nvidia_driver:
-                if detected_nvidia_driver not in packages:
-                    gui_must.append(detected_nvidia_driver)
+                # For DKMS drivers, ensure driver and related packages are included
+                if detected_nvidia_driver.endswith('-dkms'):
+                    # Add the DKMS driver
+                    if detected_nvidia_driver not in packages:
+                        gui_must.append(detected_nvidia_driver)
+                    # Add related packages if they're not already in the list
+                    for related_pkg in detected_nvidia_related:
+                        if related_pkg not in packages and related_pkg not in gui_must:
+                            gui_must.append(related_pkg)
+                    # Ensure DKMS package is included (needed to build DKMS modules)
+                    if 'dkms' not in packages and 'dkms' not in gui_must:
+                        gui_must.append('dkms')
+                        self._emit(
+                            "[INFO] Adding 'dkms' package for DKMS driver build.\n"
+                        )
+                    # Ensure kernel headers are included for DKMS build
+                    # Try to detect which kernel is being used
+                    kernel_packages = [
+                        'linux-headers', 'linux-lts-headers',
+                        'linux-cachyos-headers', 'linux-cachyos-bore-headers',
+                        'linux-cachyos-lts-headers', 'linux-cachyos-hardened-headers'
+                    ]
+                    kernel_detected = False
+                    for kernel_hdr in kernel_packages:
+                        if kernel_hdr.replace('-headers', '') in packages:
+                            if kernel_hdr not in packages and kernel_hdr not in gui_must:
+                                gui_must.append(kernel_hdr)
+                                kernel_detected = True
+                                break
+                    if not kernel_detected:
+                        # Default to linux-headers if no specific kernel detected
+                        if 'linux-headers' not in packages and 'linux-headers' not in gui_must:
+                            gui_must.append('linux-headers')
+                    self._emit(
+                        f"[INFO] Detected NVIDIA DKMS driver: {detected_nvidia_driver}\n"
+                    )
+                    if detected_nvidia_related:
+                        self._emit(
+                            f"[INFO] Including related NVIDIA packages: "
+                            f"{', '.join(detected_nvidia_related)}\n"
+                        )
+                    self._emit(
+                        "[INFO] DKMS modules will be built during ISO creation.\n"
+                    )
+                else:
+                    # Standard nvidia or nvidia-open driver
+                    if detected_nvidia_driver not in packages:
+                        gui_must.append(detected_nvidia_driver)
                     self._emit(
                         f"[INFO] Detected NVIDIA driver on system: "
                         f"{detected_nvidia_driver}, will include in ISO.\n"
                     )
             # If no NVIDIA driver detected but nvidia package exists, use it
             elif 'nvidia' in packages and 'nvidia-open' not in packages:
-                # Don't add to gui_must, already in packages
-                pass
+                # Check if it's a DKMS version in packages
+                dkms_found = False
+                for pkg in packages:
+                    if pkg.startswith('nvidia-') and pkg.endswith('-dkms'):
+                        dkms_found = True
+                        # Try to find related packages
+                        version_prefix = (
+                            pkg.replace('nvidia-', '').replace('-dkms', '')
+                        )
+                        for related in packages:
+                            if (f'nvidia-{version_prefix}' in related or
+                                    f'lib32-nvidia-{version_prefix}' in related):
+                                if related not in detected_nvidia_related:
+                                    detected_nvidia_related.append(related)
+                        break
+                if dkms_found:
+                    # Ensure kernel headers for DKMS
+                    kernel_packages = [
+                        'linux-headers', 'linux-lts-headers',
+                        'linux-cachyos-headers', 'linux-cachyos-bore-headers',
+                        'linux-cachyos-lts-headers', 'linux-cachyos-hardened-headers'
+                    ]
+                    for kernel_hdr in kernel_packages:
+                        if kernel_hdr.replace('-headers', '') in packages:
+                            if kernel_hdr not in packages and kernel_hdr not in gui_must:
+                                gui_must.append(kernel_hdr)
+                                break
             elif 'nvidia-open' in packages:
                 # Don't add to gui_must, already in packages
                 pass
@@ -1037,11 +1156,12 @@ class ISOBuilderThread(QThread):
                 "archiso-live\n"
             )
 
-            # Disable PC speaker beep by blacklisting module early via kernel parameter
+            # Disable PC speaker beep by:
+            # 1. Commenting out GRUB play commands (disables beep during countdown)
+            # 2. Blacklisting pcspkr module via kernel parameter (disables beep in live session)
             # This will be added to all kernel command lines in GRUB/efiboot configs
-            # We'll add it via archiso's kernel parameters in boot configs
             self._emit(
-                "[INFO] Configuring boot options to disable motherboard speaker...\n"
+                "[INFO] Configuring boot options to disable GRUB beep and motherboard speaker...\n"
             )
 
             # Add kernel parameter to bootloader configs if they exist
@@ -1059,14 +1179,24 @@ class ISOBuilderThread(QThread):
                             content = f.read()
                         # Add kernel parameter to linux entries
                         # Match lines like: linux ... archisobasedir=arch ...
+                        # Also comment out GRUB play commands to disable beep on countdown
                         modified_content = []
                         for line in content.split('\n'):
-                            if line.strip().startswith('linux') and 'archisobasedir' in line:
+                            # Comment out GRUB play commands to disable beep sound
+                            stripped = line.strip()
+                            if stripped.startswith('play ') and not stripped.startswith('#'):
+                                # Comment out the play command
+                                indent = len(line) - len(line.lstrip())
+                                line = ' ' * indent + '#' + stripped
+                            elif line.strip().startswith('linux') and 'archisobasedir' in line:
                                 # Add modprobe.blacklist=pcspkr if not already present
                                 if 'modprobe.blacklist=pcspkr' not in line:
                                     # Add before archisobasedir or at end of options
                                     if 'archisobasedir=' in line:
-                                        line = line.replace('archisobasedir=', kernel_params + ' archisobasedir=')
+                                        line = line.replace(
+                                            'archisobasedir=',
+                                            kernel_params + ' archisobasedir='
+                                        )
                                     else:
                                         line = line.rstrip() + kernel_params
                             modified_content.append(line)
@@ -1146,6 +1276,7 @@ HOOKS=(base udev autodetect modconf block filesystems keyboard fsck)
 
             # Only add nvidia module if nvidia or nvidia-open driver is in packages
             # Check for actual driver packages, not utility packages
+            # According to Arch wiki, nvidia should be in MODULES for early KMS
             has_nvidia = any(
                 pkg in ['nvidia', 'nvidia-open'] or
                 (pkg.startswith('nvidia-') and pkg.endswith('-dkms'))
@@ -1155,7 +1286,7 @@ HOOKS=(base udev autodetect modconf block filesystems keyboard fsck)
                 modules_list.append('nvidia')
                 self._emit(
                     "[INFO] NVIDIA driver detected - adding nvidia module to "
-                    "mkinitcpio for early KMS.\n"
+                    "mkinitcpio MODULES for early KMS (DRM kernel mode setting).\n"
                 )
 
             # Add audio and network modules for early loading
