@@ -188,7 +188,7 @@ if pacman -Qq gdm &>/dev/null; then
   if [[ -z "$AUTO_LOGIN_USER" ]] || [[ "$AUTO_LOGIN_USER" == "None" ]] || [[ -z "{USER_PASSWORD}" ]]; then
     AUTO_LOGIN_USER="root"
   fi
-
+  
   cat > /etc/gdm/custom.conf <<EOF
 [daemon]
 AutomaticLoginEnable=True
@@ -204,7 +204,7 @@ WaylandEnable=true
 
 [debug]
 EOF
-
+  
   # Ensure Wayland session is available and configured
   # GDM will automatically use Wayland for compatible systems
   mkdir -p /etc/environment.d
@@ -212,6 +212,33 @@ EOF
 # Enable Wayland support
 XDG_SESSION_TYPE=wayland
 EOF
+fi
+
+# 7) Copy installer script to user home as fallback
+# The installer is already in /root/Desktop/install.sh, but copy it to user home
+# if a user account is configured (since they might be auto-logged in)
+if [[ -n "{USERNAME}" ]] && [[ "{USERNAME}" != "None" ]] && [[ -n "{USER_PASSWORD}" ]]; then
+  USER_HOME="/home/{USERNAME}"
+  if [[ -d "$USER_HOME" ]]; then
+    # Copy installer script to user's home directory
+    if [[ -f "/root/Desktop/install.sh" ]]; then
+      cp /root/Desktop/install.sh "$USER_HOME/install.sh" || true
+      chmod +x "$USER_HOME/install.sh" || true
+      chown "{USERNAME}:{USERNAME}" "$USER_HOME/install.sh" || true
+      echo "Copied installer script to $USER_HOME/install.sh"
+    fi
+    
+    # Also copy desktop icon to user's Desktop if it exists
+    if [[ -f "/root/Desktop/Install Arch.desktop" ]]; then
+      mkdir -p "$USER_HOME/Desktop" || true
+      cp /root/Desktop/Install Arch.desktop "$USER_HOME/Desktop/Install Arch.desktop" || true
+      chmod +x "$USER_HOME/Desktop/Install Arch.desktop" || true
+      chown "{USERNAME}:{USERNAME}" "$USER_HOME/Desktop/Install Arch.desktop" || true
+      # Update the desktop file to point to the user's home copy of install.sh
+      sed -i "s|Exec=/root/Desktop/install.sh|Exec=$USER_HOME/install.sh|" "$USER_HOME/Desktop/Install Arch.desktop" || true
+      echo "Copied desktop icon to $USER_HOME/Desktop/Install Arch.desktop"
+    fi
+  fi
 fi
 
 # Ensure we boot to graphical target by default

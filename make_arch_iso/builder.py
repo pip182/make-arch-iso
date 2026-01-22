@@ -17,40 +17,59 @@ class ISOBuilderThread(QThread):
 
     # Default directories to exclude from ISO (temp/cache files)
     DEFAULT_EXCLUDE_DIRS = [
-        # Cache directories
+        # -----------------------------
+        # Cache directories (general)
+        # -----------------------------
         '.cache',
         'cache',
-        '.local/share/Trash',
         '.thumbnails',
         '.thumbs',
-        # User directories (large media files)
+
+        # Application cache subfolders
+        '.cache/spotify',
+
+        # Trash
+        '.local/share/Trash',
+
+        # ---------------------------------
+        # User folders (potentially large)
+        # ---------------------------------
+        'Documents',
         'Downloads',
-        'Templates',
-        'Public',
-        'Videos',
         'Music',
         'Pictures',
-        'Documents',
-        # Browser caches and data
-        '.mozilla/firefox/*/cache2',
+        'Public',
+        'Templates',
+        'Videos',
+
+        # ---------------------------------
+        # Browser caches and profiles
+        # ---------------------------------
+        # Firefox
         '.mozilla/firefox/*/Cache',
-        '.mozilla/firefox/*/cache',
         '.mozilla/firefox/*/Code Cache',
+        '.mozilla/firefox/*/cache',
+        '.mozilla/firefox/*/cache2',
         '.mozilla/firefox/*/startupCache',
+
+        # Chrome/Chromium, Brave, Vivaldi, etc.
         '.config/google-chrome/*/Cache',
-        '.config/google-chrome/*/cache',
         '.config/google-chrome/*/OptGuideOnDeviceModel',
-        '.config/google-chrome/*/optimization_guide_model_store',
-        '.config/google-chrome/*/component_crx_cache',
         '.config/google-chrome/*/WasmTtsEngine',
         '.config/google-chrome/*/Safe Browsing',
+        '.config/google-chrome/*/cache',
+        '.config/google-chrome/*/component_crx_cache',
+        '.config/google-chrome/*/optimization_guide_model_store',
+
         '.config/chromium/*/Cache',
-        '.config/chromium/*/cache',
         '.config/chromium/*/OptGuideOnDeviceModel',
+        '.config/chromium/*/cache',
         '.config/chromium/*/optimization_guide_model_store',
+
         '.config/BraveSoftware/*/Cache',
-        '.config/BraveSoftware/*/cache',
         '.config/BraveSoftware/*/OptGuideOnDeviceModel',
+        '.config/BraveSoftware/*/cache',
+
         '.config/microsoft-edge/*/Cache',
         '.config/microsoft-edge/*/cache',
         '.config/opera/*/Cache',
@@ -58,129 +77,202 @@ class ISOBuilderThread(QThread):
         '.config/vivaldi/*/Cache',
         '.config/vivaldi/*/cache',
         '.config/torbrowser',
+
+        # -------------------------------
         # Messaging/communication apps
-        '.local/share/TelegramDesktop',
-        '.config/telegram-desktop',
-        '.config/discord',
+        # -------------------------------
         '.discord',
-        '.config/Signal',
-        '.config/slack',
-        '.config/Element',
+        '.local/share/TelegramDesktop',
         '.thunderbird',
-        # Snap/Docker/VirtualBox/Containers
-        'snap',
-        '.snap',
-        '.docker',
-        'docker',
-        'VirtualBox VMs',
+        '.config/Element',
+        '.config/Signal',
+        '.config/discord',
+        '.config/slack',
+        '.config/telegram-desktop',
+
+        # -----------------------------------------
+        # Snap/containers/virtualization/VM config
+        # -----------------------------------------
         '.VirtualBox',
-        '.vagrant',
+        '.docker',
         '.kube',
         '.lxc',
         '.local/share/lxc',
+        '.snap',
+        '.vagrant',
+        'VirtualBox VMs',
+        'docker',
+        'snap',
+
+        # -------------------------------
         # Temp directories
-        'tmp',
-        'temp',
-        '.tmp',
+        # -------------------------------
         '.temp',
-        # Build artifacts
-        'node_modules',
-        '__pycache__',
-        '.pytest_cache',
-        '.tox',
-        'dist',
-        'build',
-        '.build',
-        '.eggs',
-        '*.egg-info',
-        '.coverage',
-        'htmlcov',
-        'target',  # Rust build directory
-        # Package manager caches
-        '.npm',
-        '.yarn',
-        '.yarn/cache',
-        '.gradle',
-        '.m2',
-        '.pip',
-        '.cargo/registry',
-        '.cargo/git',
-        'go/pkg',
-        '.composer',
-        '.gem',
-        '.nuget',
-        # Steam and games
-        '.steam',
-        '.local/share/Steam',
-        '.local/share/lutris',
-        '.wine',
-        # IDE/Editor files and application data (can be very large)
-        '.idea',
-        '.IntelliJIdea*',
+        '.tmp',
+        'temp',
+        'tmp',
+
+        # -------------------------------------------------
+        # Build artifacts/directories, development caches
+        # -------------------------------------------------
         '.PyCharm*',
         '.WebStorm*',
-        '.CLion*',
-        '.PhpStorm*',
-        '.RubyMine*',
-        '.AndroidStudio*',
-        '.vscode',
-        '.vs',
-        '.vim',
-        '.config/nvim',
-        '.local/share/nvim',
-        '.emacs.d',
-        '.emacs',
-        '.venv',
-        'venv',
-        'env',
+        '.build',
+        '.coverage',
+        '.eggs',
         '.env',
-        '.viminfo',
+        '.idea',
+        '.pytest_cache',
+        '.sublime-*',
+        '.tox',
+        '__pycache__',
+        'build',
+        'dist',
+        'env',
+        'htmlcov',
+        'node_modules',
+        'target',
+        'venv',
+        '*.egg-info',
+        '*.lock',
         '*.swp',
         '*.swo',
         '*.swn',
         '*~',
-        '.sublime-*',
+        '.viminfo',
+        '.vim',
+        '.gitconfig',
+        '.IntelliJIdea*',
+        '.PhpStorm*',
+        '.RubyMine*',
+        '.AndroidStudio*',
+        '.CLion*',
+        '.vscode',
+        '.vs',
+        '.emacs',
+        '.emacs.d',
+        '.local/share/nvim',
+        '.config/nvim',
         '.atom',
-        # IDE application data directories (very large)
-        '.config/Cursor',
+        '.venv',
+
+        # ------------------------------------------
+        # App/editor/config data (large, opt-in)
+        # ------------------------------------------
+        '.config/Antigravity',
         '.config/Code',
         '.config/Code - OSS',
+        '.config/Cursor',
+        '.config/Electron',
+        '.config/GIMP',
         '.config/RedisInsight',
         '.config/Upscayl',
-        '.config/Antigravity',
-        '.config/Electron',
-        '.config/unity3d',
-        '.config/libreoffice',
-        '.config/GIMP',
         '.config/gmic',
+        '.config/libreoffice',
+        '.config/unity3d',
+        '.local/share/Colossal Order',
         '.local/share/DBeaverData',
         '.local/share/GitKrakenCLI',
         '.local/share/Paradox Interactive',
-        '.local/share/Colossal Order',
-        # Media players and apps
-        '.config/spotify',
-        '.cache/spotify',
-        '.config/zoom',
-        '.zoom',
-        # Cloud sync folders
+
+        # -------------------------------
+        # Cloud sync and backup folders
+        # -------------------------------
         '.dropbox',
         '.nextcloud',
         '.nextcloud-client',
+
+        # -------------------------------
+        # Media players and video calls
+        # -------------------------------
+        '.config/spotify',
+        '.config/zoom',
+        '.zoom',
+
+        # ---------------
         # Log files
+        # ---------------
         '*.log',
         '.logs',
-        # Lock and backup files
-        '*.lock',
-        '.lock',
+
+        # ---------------------------------
+        # Locks, backup, and recovery files
+        # ---------------------------------
         '*.bak',
         '*.backup',
+        '*.lock',
         '*.orig',
+        '.lock',
         '.recovery',
-        # OS/system-specific files
+
+        # ---------------------------------
+        # System/OS-specific files
+        # ---------------------------------
         '.DS_Store',
-        'Thumbs.db',
         '.Trash-*',
         '.Xauthority',
+        'Thumbs.db',
+
+        # ---------------------------------------------------------------------------
+        # Database/data store directories (user or system, large data, likely omitted)
+        # ---------------------------------------------------------------------------
+        'cassandra',
+        'couchdb',
+        'influxdb',
+        'mariadb',
+        'mongodb',
+        'mysql',
+        'postgres',
+        'postgresql',
+        'redis',
+        '.cassandra',
+        '.couchdb',
+        '.influxdb',
+        '.mariadb',
+        '.mongodb',
+        '.mysql',
+        '.postgres',
+        '.postgresql',
+        '.redis',
+        '.sqlite',
+
+        # Database files
+        '*.db',
+        '*.db_backup',
+        '*.dump',
+        '*.sql',
+        '*.sql.gz',
+        '*.sqlite',
+        '*.sqlite3',
+
+        # -----------------
+        # System database directories (absolute paths)
+        # -----------------
+        '/var/lib/cassandra',
+        '/var/lib/couchdb',
+        '/var/lib/influxdb',
+        '/var/lib/mariadb',
+        '/var/lib/mongodb',
+        '/var/lib/mysql',
+        '/var/lib/postgres',
+        '/var/lib/postgresql',
+        '/var/lib/redis',
+
+        # -----------------------------------------
+        # Package manager caches
+        # -----------------------------------------
+        '.cargo/git',
+        '.cargo/registry',
+        '.composer',
+        '.gem',
+        '.gradle',
+        '.m2',
+        '.npm',
+        '.nuget',
+        '.pip',
+        '.yarn',
+        '.yarn/cache',
+        'go/pkg',
     ]
     # Directories to include when copying user template (focus on configs)
     HOME_COPY_INCLUDES = [
@@ -202,143 +294,281 @@ class ISOBuilderThread(QThread):
     ]
     # Directories to exclude when copying user template (temp/cache files)
     HOME_COPY_EXCLUDES = [
-        # Cache directories
+        # -----------------------------
+        # Cache directories (general)
+        # -----------------------------
         '.cache',
         '.cache/*',
-        '.local/share/Trash',
         '.thumbnails',
-        '.thumbs',
         '.thumb',
-        # Browser caches
-        '.mozilla/firefox/*/cache2',
+        '.thumbs',
+        '.local/share/Trash',
+
+        # -------------------------------
+        # Browser caches and profiles
+        # -------------------------------
+        # Firefox
         '.mozilla/firefox/*/Cache',
+        '.mozilla/firefox/*/Code Cache',
         '.mozilla/firefox/*/cache',
+        '.mozilla/firefox/*/cache2',
+        '.mozilla/firefox/*/startupCache',
+
+        # Chrome/Chromium, Brave, Vivaldi, etc.
         '.config/google-chrome/*/Cache',
-        '.config/google-chrome/*/cache',
-        # Google Chrome large data directories (exclude large folders like OptGuideOnDeviceModel)
         '.config/google-chrome/*/OptGuideOnDeviceModel',
-        '.config/google-chrome/*/optimization_guide_model_store',
-        '.config/google-chrome/*/component_crx_cache',
-        '.config/google-chrome/*/WasmTtsEngine',
         '.config/google-chrome/*/Safe Browsing',
+        '.config/google-chrome/*/WasmTtsEngine',
+        '.config/google-chrome/*/cache',
+        '.config/google-chrome/*/component_crx_cache',
+        '.config/google-chrome/*/optimization_guide_model_store',
+
         '.config/chromium/*/Cache',
-        '.config/chromium/*/cache',
         '.config/chromium/*/OptGuideOnDeviceModel',
+        '.config/chromium/*/cache',
         '.config/chromium/*/optimization_guide_model_store',
+
         '.config/BraveSoftware/*/Cache',
-        '.config/BraveSoftware/*/cache',
         '.config/BraveSoftware/*/OptGuideOnDeviceModel',
-        # Temp directories
-        'tmp',
-        'temp',
-        '.tmp',
-        '.temp',
-        'Downloads',
-        # Package manager caches
-        '.npm',
-        '.yarn',
-        '.yarn/cache',
-        '.gradle',
-        '.m2',
-        '.cargo/registry',
-        '.cargo/git',
-        '.pip',
-        # Arch-specific package manager caches (can be very large)
-        '.cache/yay',
-        '.cache/paru',
-        '.cache/pamac',
-        '.cache/pacman',
-        # Application caches (can be very large)
-        '.cache/yarn',
-        '.cache/pip',
-        '.cache/npm',
-        '.cache/electron',
-        '.cache/mozilla',
-        '.cache/google-chrome',
+        '.config/BraveSoftware/*/cache',
+
+        '.config/microsoft-edge/*/Cache',
+        '.config/microsoft-edge/*/cache',
+
+        '.config/opera/*/Cache',
+        '.config/opera/*/cache',
+
+        '.config/vivaldi/*/Cache',
+        '.config/vivaldi/*/cache',
+
+        '.config/torbrowser',
+
+        # -------------------------------
+        # Application caches (large)
+        # -------------------------------
         '.cache/BraveSoftware',
-        '.cache/chromium',
         '.cache/Code',
         '.cache/Cursor',
+        '.cache/chromium',
+        '.cache/electron',
         '.cache/gnome-software',
+        '.cache/google-chrome',
         '.cache/ms-playwright-go',
+        '.cache/mozilla',
         '.cache/node-gyp',
+        '.cache/npm',
         '.cache/nvidia',
-        # Build artifacts
-        'node_modules',
+        '.cache/pacman',
+        '.cache/pamac',
+        '.cache/paru',
+        '.cache/pip',
+        '.cache/yarn',
+        '.cache/yay',
+
+        # -------------------------------
+        # Temp directories
+        # -------------------------------
+        '.temp',
+        '.tmp',
+        'Downloads',
+        'temp',
+        'tmp',
+
+        # -----------------------------------------
+        # Package manager caches
+        # -----------------------------------------
+        '.cargo/git',
+        '.cargo/registry',
+        '.composer',
+        '.gem',
+        '.gradle',
+        '.m2',
+        '.npm',
+        '.nuget',
+        '.pip',
+        '.yarn',
+        '.yarn/cache',
+        'go/pkg',
+
+        # -------------------------------------------------
+        # Build artifacts/directories, development caches
+        # -------------------------------------------------
+        '.PyCharm*',
+        '.WebStorm*',
+        '.build',
+        '.coverage',
+        '.eggs',
+        '.env',
+        '.env/*',
+        '.idea',
+        '.pytest_cache',
+        '.sublime-*',
+        '.tox',
         '__pycache__',
+        'build',
+        'dist',
+        'env',
+        'htmlcov',
+        'node_modules',
+        'target',
+        'venv',
+        '.venv',
+        '.venv/*',
+        '*.egg-info',
+        '*.lock',
         '*.pyc',
         '*.pyo',
-        '.pytest_cache',
-        '.tox',
-        'dist',
-        'build',
-        '.build',
-        '.eggs',
-        '*.egg-info',
-        '.coverage',
-        'htmlcov',
-        # IDE/Editor files
-        '.idea',
-        '.vscode',
-        '.vs',
-        '.venv/*',
-        '.env/*',
         '*.swp',
         '*.swo',
         '*.swn',
         '*~',
         '.vim',
         '.viminfo',
-        '.sublime-*',
+        '.IntelliJIdea*',
+        '.PhpStorm*',
+        '.RubyMine*',
+        '.AndroidStudio*',
+        '.CLion*',
+        '.vscode',
+        '.vs',
+        '.emacs',
+        '.emacs.d',
+        '.local/share/nvim',
+        '.config/nvim',
         '.atom',
-        # IDE application data directories (very large)
-        '.config/Cursor',
+        '.gitconfig',
+
+        # ------------------------------------------
+        # App/editor/config data (large, opt-in)
+        # ------------------------------------------
+        '.config/Antigravity',
         '.config/Code',
         '.config/Code - OSS',
+        '.config/Cursor',
+        '.config/Electron',
+        '.config/GIMP',
         '.config/RedisInsight',
         '.config/Upscayl',
-        '.config/Antigravity',
-        '.config/Electron',
-        '.config/unity3d',
-        '.config/libreoffice',
-        '.config/GIMP',
         '.config/gmic',
-        '.local/share/DBeaverData',
-        '.local/share/Paradox Interactive',
+        '.config/libreoffice',
+        '.config/unity3d',
         '.local/share/Colossal Order',
-        # Flatpak/Snap application data
-        '.var',
-        '.local/share/flatpak',
-        '.local/share/applications',
-        # Container and VM data
+        '.local/share/DBeaverData',
+        '.local/share/GitKrakenCLI',
+        '.local/share/Paradox Interactive',
+
+        # -------------------------------
+        # Messaging/communication apps
+        # -------------------------------
+        '.discord',
+        '.local/share/TelegramDesktop',
+        '.thunderbird',
+        '.config/Element',
+        '.config/Signal',
+        '.config/discord',
+        '.config/slack',
+        '.config/telegram-desktop',
+
+        # -----------------------------------------
+        # Snap/containers/virtualization/VM config
+        # -----------------------------------------
+        '.VirtualBox',
+        '.docker',
+        '.kube',
+        '.lxc',
         '.local/share/containers',
         '.local/share/docker',
-        '.local/share/podman',
         '.local/share/libvirt',
-        # Flatpak runtime data
+        '.local/share/lxc',
+        '.local/share/podman',
+        '.snap',
+        '.vagrant',
+        'VirtualBox VMs',
+        'docker',
+        'snap',
+
+        # -------------------------------
+        # Cloud sync and backup folders
+        # -------------------------------
+        '.dropbox',
+        '.nextcloud',
+        '.nextcloud-client',
+
+        # -------------------------------
+        # Media players and video calls
+        # -------------------------------
+        '.config/spotify',
+        '.cache/spotify',
+        '.config/zoom',
+        '.zoom',
+
+        # -------------------------------
+        # Flatpak/Snap application data
+        # -------------------------------
+        '.local/share/applications',
+        '.local/share/flatpak',
         '.local/share/runtime',
-        # Steam
         '.steam',
         '.local/share/Steam',
-        # Flatpak/Snap application data
+        '.local/share/lutris',
+        '.wine',
         '.var',
-        '.local/share/flatpak',
-        '.local/share/applications',
-        # Container and VM data
-        '.local/share/containers',
-        '.local/share/docker',
-        '.local/share/podman',
-        '.local/share/libvirt',
-        # Flatpak runtime data
-        '.local/share/runtime',
+
+        # ---------------------------------------------------------------------------
+        # Database/data store directories (large data, likely omitted)
+        # ---------------------------------------------------------------------------
+        'cassandra',
+        'couchdb',
+        'influxdb',
+        'mariadb',
+        'mongodb',
+        'mysql',
+        'postgres',
+        'postgresql',
+        'redis',
+        '.cassandra',
+        '.couchdb',
+        '.influxdb',
+        '.mariadb',
+        '.mongodb',
+        '.mysql',
+        '.postgres',
+        '.postgresql',
+        '.redis',
+        '.sqlite',
+
+        # Database files
+        '*.db',
+        '*.db_backup',
+        '*.dump',
+        '*.sql',
+        '*.sql.gz',
+        '*.sqlite',
+        '*.sqlite3',
+
+        # ---------------
         # Log files
+        # ---------------
         '*.log',
         '*.log.*',
         '.logs',
-        # Lock files
+
+        # ---------------------------------
+        # Locks, backup, and recovery files
+        # ---------------------------------
+        '*.bak',
+        '*.backup',
         '*.lock',
+        '*.orig',
         '.lock',
+        '.recovery',
+
+        # ---------------------------------
+        # System/OS-specific files
+        # ---------------------------------
         '.DS_Store',
+        '.Trash-*',
+        '.Xauthority',
         'Thumbs.db',
     ]
 
@@ -1458,7 +1688,20 @@ HOOKS=(base udev autodetect modconf block filesystems keyboard fsck)
             )
             desktop_content = self._load_script_template('Install Arch.desktop')
             self._write_text(desktop_shortcut, desktop_content)
+            # Desktop files should be executable and readable
             os.chmod(desktop_shortcut, 0o755)
+            
+            # Also create desktop file in system-wide applications directory
+            # This ensures it appears in application menus even if Desktop folder isn't visible
+            applications_dir = os.path.join(
+                airootfs, 'usr', 'share', 'applications'
+            )
+            os.makedirs(applications_dir, exist_ok=True)
+            system_desktop = os.path.join(
+                applications_dir, 'Install Arch.desktop'
+            )
+            self._write_text(system_desktop, desktop_content)
+            os.chmod(system_desktop, 0o644)  # Standard permissions for .desktop files
             self.progress_signal.emit(50)
 
             # Create custom build hook to exclude directories
